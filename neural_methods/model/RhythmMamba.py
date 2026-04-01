@@ -189,19 +189,27 @@ class Block_mamba(nn.Module):
 
     def forward(self, x):
         B, D, C = x.size()
+        
         #Multi-temporal Parallelization
         path = 3
         segment = 2**(path-1)
         tt = D // segment
+        
         x_r = x.repeat(segment,1,1)
         x_o = x_r.clone()
         for i in range(1,segment):
             x_o[i*B:(i+1)*B,:D-i*tt,:] = x_r[i*B:(i+1)*B,i*tt:,:]
+            
+  
         x_o = self.attn(x_o)
+        
+        
         for i in range(1,segment):
             for j in range(i):
                 x_o[0:B, tt*i: tt*(i+1) , :] = x_o[0:B, tt*i: tt*(i+1) , :] + x_o[B*(j+1):B*(j+2), tt*(i-j-1): tt*(i-j) , :]
             x_o[0:B, tt*i: tt*(i+1) , :] = x_o[0:B, tt*i: tt*(i+1) , :] / (i+1)
+        
+        
         x = x + self.drop_path(self.norm1(x_o[0:B]))
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
