@@ -9,7 +9,7 @@ TRAIN:
   DATA:
     FS: 30
     DATASET: UBFC
-    DO_PREPROCESS: True                # Đổi thành True cho lần chạy đầu tiên để tạo cache
+    DO_PREPROCESS: False                # Đổi thành True cho lần chạy đầu tiên để tạo cache
     DATA_FORMAT: NDCHW
     DATA_PATH: "./data/UBFC-rPPG/"     # Cập nhật đường dẫn Raw dataset
     CACHED_PATH: "./data/cached/UBFC/" # Cập nhật đường dẫn lưu dataset sau khi xử lý
@@ -36,7 +36,7 @@ VALID:
   DATA:
     FS: 30
     DATASET: UBFC
-    DO_PREPROCESS: True                # Đổi thành True cho lần chạy đầu tiên để tạo cache
+    DO_PREPROCESS: False              # Đổi thành True cho lần chạy đầu tiên để tạo cache
     DATA_FORMAT: NDCHW
     DATA_PATH: "./data/UBFC-rPPG/"     # Cập nhật đường dẫn Raw dataset
     CACHED_PATH: "./data/cached/UBFC/" # Cập nhật đường dẫn lưu cache
@@ -65,7 +65,7 @@ TEST:
   DATA:
     FS: 30
     DATASET: UBFC
-    DO_PREPROCESS: True                # Đổi thành True
+    DO_PREPROCESS: False               # Đổi thành True
     DATA_FORMAT: NDCHW
     DATA_PATH: "./data/UBFC-rPPG/"     # Cập nhật đường dẫn Raw dataset
     CACHED_PATH: "./data/cached/UBFC/" # Cập nhật đường dẫn lưu cache

@@ -359,7 +359,7 @@ class RhythmMamba(nn.Module):
     def forward(self, x):
         B, D, C, H, W = x.shape
 
-        x = self.Generalization_Stem(x)  #[N D C H W]
+        x = self.Generalization_Stem(x)
         x = self.Fusion_Stem(x)    #[N*D C H/8 W/8]
         x = x.view(B,D,self.embed_dim//4,H//8,W//8).permute(0,2,1,3,4)
         x = self.stem3(x)
