@@ -21,6 +21,8 @@ from tqdm import tqdm
 from scipy.interpolate import interp1d
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import traceback
+
 class BaseLoader(Dataset):
     """The base class for data loading based on pytorch Dataset.
 
@@ -423,50 +425,122 @@ class BaseLoader(Dataset):
             count += 1
         return input_path_name_list, label_path_name_list
 
-    def multi_process_manager(self, data_dirs, config_preprocess, multi_process_quota=8):
-        """Allocate dataset preprocessing across multiple processes.
+    # def multi_process_manager(self, data_dirs, config_preprocess, multi_process_quota=8):
+    #     """Allocate dataset preprocessing across multiple processes.
 
-        Args:
-            data_dirs(List[str]): a list of video_files.
-            config_preprocess(Dict): a dictionary of preprocessing configurations
-            multi_process_quota(Int): max number of sub-processes to spawn for multiprocessing
-        Returns:
-            file_list_dict(Dict): Dictionary containing information regarding processed data ( path names)
-        """
+    #     Args:
+    #         data_dirs(List[str]): a list of video_files.
+    #         config_preprocess(Dict): a dictionary of preprocessing configurations
+    #         multi_process_quota(Int): max number of sub-processes to spawn for multiprocessing
+    #     Returns:
+    #         file_list_dict(Dict): Dictionary containing information regarding processed data ( path names)
+    #     """
+    #     print('Preprocessing dataset...')
+    #     file_num = len(data_dirs)
+    #     choose_range = range(0, file_num)
+    #     pbar = tqdm(list(choose_range))
+
+    #     # shared data resource
+    #     manager = Manager()  # multi-process manager
+    #     file_list_dict = manager.dict()  # dictionary for all processes to store processed files
+    #     p_list = []  # list of processes
+    #     running_num = 0  # number of running processes
+
+    #     # in range of number of files to process
+    #     for i in choose_range:
+    #         process_flag = True
+    #         while process_flag:  # ensure that every i creates a process
+    #             if running_num < multi_process_quota:  # in case of too many processes
+    #                 # send data to be preprocessing task
+    #                 p = Process(target=self.preprocess_dataset_subprocess, 
+    #                             args=(data_dirs,config_preprocess, i, file_list_dict))
+    #                 p.start()
+    #                 p_list.append(p)
+    #                 running_num += 1
+    #                 process_flag = False
+    #             for p_ in p_list:
+    #                 if not p_.is_alive():
+    #                     p_list.remove(p_)
+    #                     p_.join()
+    #                     running_num -= 1
+    #                     pbar.update(1)
+    #     # join all processes
+    #     for p_ in p_list:
+    #         p_.join()
+    #         pbar.update(1)
+    #     pbar.close()
+
+    #     return file_list_dict
+    
+    def _safe_preprocess_subprocess(self, data_dirs, config_preprocess, i, file_list_dict, error_dict):
+        """Hàm bọc an toàn để bắt mọi lỗi của tiến trình con và ghi vào error_dict"""
+        try:
+            # Gọi lại hàm xử lý lõi ban đầu của bạn
+            self.preprocess_dataset_subprocess(data_dirs, config_preprocess, i, file_list_dict)
+        except Exception as e:
+            # Nếu có bất kỳ lỗi nào, tóm lấy nó và ghi vào error_dict
+            error_trace = traceback.format_exc()
+            error_dict[i] = f"LỖI: {str(e)}\nCHI TIẾT TRACEBACK:\n{error_trace}"
+
+    def multi_process_manager(self, data_dirs, config_preprocess, multi_process_quota=8):
+        """Allocate dataset preprocessing across multiple processes (Safe & Robust)."""
         print('Preprocessing dataset...')
         file_num = len(data_dirs)
         choose_range = range(0, file_num)
         pbar = tqdm(list(choose_range))
 
-        # shared data resource
-        manager = Manager()  # multi-process manager
-        file_list_dict = manager.dict()  # dictionary for all processes to store processed files
-        p_list = []  # list of processes
-        running_num = 0  # number of running processes
+        # Khởi tạo Manager và 2 cuốn sổ dùng chung
+        manager = Manager()
+        file_list_dict = manager.dict()
+        error_dict = manager.dict()
 
-        # in range of number of files to process
+        running = []
+        proc_to_idx = {}
+
+        # Hàm nội bộ để dọn dẹp các tiến trình đã xong
+        def flush_finished():
+            finished = []
+            for p in running:
+                if not p.is_alive():
+                    p.join()
+                    finished.append(p)
+                    pbar.update(1)
+            for p in finished:
+                running.remove(p)
+
+        # Rải việc cho các tiến trình
         for i in choose_range:
-            process_flag = True
-            while process_flag:  # ensure that every i creates a process
-                if running_num < multi_process_quota:  # in case of too many processes
-                    # send data to be preprocessing task
-                    p = Process(target=self.preprocess_dataset_subprocess, 
-                                args=(data_dirs,config_preprocess, i, file_list_dict))
-                    p.start()
-                    p_list.append(p)
-                    running_num += 1
-                    process_flag = False
-                for p_ in p_list:
-                    if not p_.is_alive():
-                        p_list.remove(p_)
-                        p_.join()
-                        running_num -= 1
-                        pbar.update(1)
-        # join all processes
-        for p_ in p_list:
-            p_.join()
-            pbar.update(1)
+            # Nếu số luồng đang chạy vượt quota, đợi dọn bớt
+            while len(running) >= multi_process_quota:
+                flush_finished()
+
+            # Gọi hàm _safe_preprocess_subprocess thay vì hàm gốc
+            p = Process(
+                target=self._safe_preprocess_subprocess,
+                args=(data_dirs, config_preprocess, i, file_list_dict, error_dict),
+            )
+            p.start()
+            running.append(p)
+            proc_to_idx[p.pid] = i
+
+        # Dọn nốt các tiến trình còn sót lại cuối cùng
+        while len(running) > 0:
+            flush_finished()
+
         pbar.close()
+
+        # PHÁN QUYẾT LỖI: In ra toàn bộ Traceback nếu có tiến trình sụp
+        if len(error_dict) > 0:
+            msgs = []
+            for k in sorted(list(error_dict.keys())):
+                subj = data_dirs[k]['path'] if k < len(data_dirs) and 'path' in data_dirs[k] else str(k)
+                msgs.append("="*50)
+                msgs.append(f"❌ THẤT BẠI TẠI VIDEO INDEX {k} | Đường dẫn: {subj}")
+                msgs.append(error_dict[k])
+                msgs.append("="*50)
+            
+            # Gây crash chủ động tiến trình mẹ và in lỗi đỏ
+            raise RuntimeError("QUÁ TRÌNH PREPROCESS BỊ CHẾT TRƯỚC KHI HOÀN THÀNH:\n\n" + "\n".join(msgs))
 
         return file_list_dict
 
