@@ -12,6 +12,27 @@ import math
 from einops import rearrange
 from mamba_ssm.modules.mamba_simple import Mamba
 
+class Generalization_Stem(nn.Module):
+    def __init__(self, in_channels=3, out_channels=3):
+        super(Generalization_Stem, self).__init__()
+        
+        self.color_proj = nn.Conv3d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
+        self.norm = nn.InstanceNorm3d(out_channels, affine=True)
+        
+    def forward(self, x):
+        """Definition of Generalization_Stem.
+        Args:
+          x [N,D,C,H,W]
+        Returns:
+          x [N,D,C,H,W] (after color projection and normalization)
+        """
+        
+        x = self.color_proj(x)
+        x = self.norm(x)
+        
+        return x
+    
+
 class Fusion_Stem(nn.Module):
     def __init__(self,apha=0.5,belta=0.5,dim=24):
         super(Fusion_Stem, self).__init__()
@@ -280,6 +301,7 @@ class RhythmMamba(nn.Module):
         super().__init__()
         self.embed_dim = embed_dim
 
+        self.Generalization_Stem = Generalization_Stem()
         self.Fusion_Stem = Fusion_Stem(dim=embed_dim//4)
         self.attn_mask = Attention_mask()
 
@@ -315,6 +337,7 @@ class RhythmMamba(nn.Module):
     def forward(self, x):
         B, D, C, H, W = x.shape
 
+        x = self.Generalization_Stem(x)  #[N D C H W]
         x = self.Fusion_Stem(x)    #[N*D C H/8 W/8]
         x = x.view(B,D,self.embed_dim//4,H//8,W//8).permute(0,2,1,3,4)
         x = self.stem3(x)

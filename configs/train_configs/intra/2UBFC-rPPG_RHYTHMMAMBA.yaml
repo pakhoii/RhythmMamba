@@ -4,7 +4,7 @@ TRAIN:
   BATCH_SIZE: 4
   EPOCHS: 30
   LR: 3e-4
-  MODEL_FILE_NAME: UBFC_UBFC_UBFC_RhythmMamba_DoiTenLai
+  MODEL_FILE_NAME: UBFC_UBFC_UBFC_RhythmMamba_With_Generalized
   AUG: 1
   DATA:
     FS: 30
