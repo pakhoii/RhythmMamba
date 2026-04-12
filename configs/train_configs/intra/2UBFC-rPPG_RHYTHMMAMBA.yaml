@@ -1,18 +1,18 @@
 BASE: ['']
 TOOLBOX_MODE: "train_and_test"      # "train_and_test"  or "only_test"
 TRAIN:
-  BATCH_SIZE: 16
+  BATCH_SIZE: 4
   EPOCHS: 30
   LR: 3e-4
-  MODEL_FILE_NAME: UBFC_UBFC_UBFC_RhythmMamba
+  MODEL_FILE_NAME: UBFC_UBFC_UBFC_RhythmMamba_DoiTenLai
   AUG: 1
   DATA:
     FS: 30
-    DATASET: UBFC-rPPG
-    DO_PREPROCESS: False               # if first time, should be true
+    DATASET: UBFC
+    DO_PREPROCESS: True                # Đổi thành True cho lần chạy đầu tiên để tạo cache
     DATA_FORMAT: NDCHW
-    DATA_PATH: "/experiment0/user/DataSet/UBFC/"          # Raw dataset path, need to be updated
-    CACHED_PATH: "../dataset/UBFC/"    # Processed dataset save path, need to be updated
+    DATA_PATH: "./data/UBFC-rPPG/"     # Cập nhật đường dẫn Raw dataset
+    CACHED_PATH: "./data/cached/UBFC/" # Cập nhật đường dẫn lưu dataset sau khi xử lý
     EXP_DATA_NAME: ""
     BEGIN: 0.0
     END: 0.72
@@ -20,7 +20,7 @@ TRAIN:
       DATA_TYPE: [ 'Standardized' ]
       LABEL_TYPE: Standardized
       DO_CHUNK: True
-      CHUNK_LENGTH: 160
+      CHUNK_LENGTH: 128
       CROP_FACE:
         DO_CROP_FACE: True
         USE_LARGE_FACE_BOX: True
@@ -28,18 +28,18 @@ TRAIN:
         DETECTION:
           DO_DYNAMIC_DETECTION: False
           DYNAMIC_DETECTION_FREQUENCY : 30
-          USE_MEDIAN_FACE_BOX: False    # This should be used ONLY if dynamic detection is used
+          USE_MEDIAN_FACE_BOX: False    
       RESIZE:
         H: 128
         W: 128
 VALID:
   DATA:
     FS: 30
-    DATASET: UBFC-rPPG
-    DO_PREPROCESS: False                  # if first time, should be true
+    DATASET: UBFC
+    DO_PREPROCESS: True                # Đổi thành True cho lần chạy đầu tiên để tạo cache
     DATA_FORMAT: NDCHW
-    DATA_PATH: "/experiment0/user/DataSet/UBFC/"          # Raw dataset path, need to be updated
-    CACHED_PATH: "../dataset/UBFC/"    # Processed dataset save path, need to be updated
+    DATA_PATH: "./data/UBFC-rPPG/"     # Cập nhật đường dẫn Raw dataset
+    CACHED_PATH: "./data/cached/UBFC/" # Cập nhật đường dẫn lưu cache
     EXP_DATA_NAME: ""
     BEGIN: 0.72
     END: 1.0
@@ -47,7 +47,7 @@ VALID:
       DATA_TYPE: [ 'Standardized' ]
       LABEL_TYPE: Standardized
       DO_CHUNK: True
-      CHUNK_LENGTH: 160
+      CHUNK_LENGTH: 128
       CROP_FACE:
         DO_CROP_FACE: True
         USE_LARGE_FACE_BOX: True
@@ -55,20 +55,20 @@ VALID:
         DETECTION:
           DO_DYNAMIC_DETECTION: False
           DYNAMIC_DETECTION_FREQUENCY : 30
-          USE_MEDIAN_FACE_BOX: False    # This should be used ONLY if dynamic detection is used
+          USE_MEDIAN_FACE_BOX: False    
       RESIZE:
         H: 128
         W: 128
 TEST:
   METRICS: ['MAE','RMSE','MAPE','Pearson','SNR']
-  USE_LAST_EPOCH: True                      # to use provided validation dataset to find the best epoch, should be false
+  USE_LAST_EPOCH: True                 # Bài báo RhythmMamba dùng epoch cuối do UBFC không có tập valid thực sự
   DATA:
     FS: 30
-    DATASET: UBFC-rPPG
-    DO_PREPROCESS: False                    # if first time, should be true
+    DATASET: UBFC
+    DO_PREPROCESS: True                # Đổi thành True
     DATA_FORMAT: NDCHW
-    DATA_PATH: "/experiment0/user/DataSet/UBFC/"          # Raw dataset path, need to be updated
-    CACHED_PATH: "../dataset/UBFC/"    # Processed dataset save path, need to be updated
+    DATA_PATH: "./data/UBFC-rPPG/"     # Cập nhật đường dẫn Raw dataset
+    CACHED_PATH: "./data/cached/UBFC/" # Cập nhật đường dẫn lưu cache
     EXP_DATA_NAME: ""
     BEGIN: 0.72
     END: 1.0
@@ -76,7 +76,7 @@ TEST:
       DATA_TYPE: [ 'Standardized' ]
       LABEL_TYPE: Standardized
       DO_CHUNK: True
-      CHUNK_LENGTH: 160
+      CHUNK_LENGTH: 128
       CROP_FACE:
         DO_CROP_FACE: True
         USE_LARGE_FACE_BOX: True
@@ -84,7 +84,7 @@ TEST:
         DETECTION:
           DO_DYNAMIC_DETECTION: False
           DYNAMIC_DETECTION_FREQUENCY : 30
-          USE_MEDIAN_FACE_BOX: False    # This should be used ONLY if dynamic detection is used
+          USE_MEDIAN_FACE_BOX: False    
       RESIZE:
         H: 128
         W: 128
@@ -95,10 +95,11 @@ LOG:
 MODEL:
   DROP_RATE: 0.2
   NAME: RhythmMamba
+  MODEL_DIR: "./PreTrainedModels"
 INFERENCE:
   BATCH_SIZE: 2
-  EVALUATION_METHOD: "FFT"        # "FFT" or "peak detection"
+  EVALUATION_METHOD: "FFT"        
   EVALUATION_WINDOW:
-    USE_SMALLER_WINDOW: False        # Change this if you'd like an evaluation window smaller than the test video length
-    WINDOW_SIZE: 10        # In seconds
+    USE_SMALLER_WINDOW: False        
+    WINDOW_SIZE: 10        
   MODEL_PATH:   ""
