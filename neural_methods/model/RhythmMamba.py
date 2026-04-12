@@ -16,24 +16,44 @@ class Generalization_Stem(nn.Module):
     def __init__(self, in_channels=3, out_channels=3):
         super(Generalization_Stem, self).__init__()
         
-        self.color_proj = nn.Conv3d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
-        self.norm = nn.InstanceNorm3d(out_channels, affine=True)
+        # Chuyển sang dùng Conv2d vì ta sẽ xử lý độc lập từng frame
+        self.color_proj = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0, bias=False)
+        
+        # 1. KHỞI TẠO CÓ CHỦ ĐÍCH (GUIDED INITIALIZATION) - Cực kỳ quan trọng
+        # Ép mô hình chú ý vào kênh Green (Index 1) thay vì xào trộn ngẫu nhiên
+        with torch.no_grad():
+            self.color_proj.weight.data = torch.tensor([
+                [[[0.2]], [[0.6]], [[0.2]]],  # Feature map 1: Nhấn mạnh Green
+                [[[0.0]], [[1.0]], [[0.0]]],  # Feature map 2: Thuần Green
+                [[[0.3]], [[0.4]], [[0.3]]]   # Feature map 3: Mix đều 3 kênh
+            ])
+            
+        # 2. CHUẨN HÓA KHÔNG GIAN (InstanceNorm2d)
+        # Chỉ chuẩn hóa trên H và W, tuyệt đối không đụng vào D
+        self.norm = nn.InstanceNorm2d(out_channels, affine=True)
         
     def forward(self, x):
         """Definition of Generalization_Stem.
         Args:
-          x [N,D,C,H,W]
+          x [N, D, C, H, W]
         Returns:
-          x [N,D,C,H,W] (after color projection and normalization)
+          x [N, D, C, H, W] (after color projection and spatial normalization)
         """
+        N, D, C, H, W = x.shape
         
-        x = x.permute(0, 2, 1, 3, 4).contiguous()  # [N,C,D,H,W]
+        # Ép về 4D để xử lý từng frame độc lập qua Conv2d và Norm2d
+        x = x.view(N * D, C, H, W)
+        
+        # Chiếu không gian màu
         x = self.color_proj(x)
+        
+        # Chuẩn hóa độ sáng từng frame
         x = self.norm(x)
-        x = x.permute(0, 2, 1, 3, 4).contiguous()  # [N,D,C,H,W]
+        
+        # Trả lại shape 5D ban đầu để tương thích với Fusion_Stem
+        x = x.view(N, D, -1, H, W)
         
         return x
-    
 
 class Fusion_Stem(nn.Module):
     def __init__(self,apha=0.5,belta=0.5,dim=24):
