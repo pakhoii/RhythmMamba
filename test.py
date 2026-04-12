@@ -8,9 +8,9 @@ from neural_methods.model.RhythmMamba import RhythmMamba
 # ======================
 # CONFIG
 # ======================
-MODEL_PATH = "PreTrainedModels/UBFC_cross_RhythmMamba.pth"
+# MODEL_PATH = "PreTrainedModels/UBFC_SizeW128_SizeH128_ClipLength128_DataTypeStandardized_DataAugNone_LabelTypeStandardized_Crop_faceTrue_Large_boxTrue_Large_size1.5_Dyamic_DetFalse_det_len30_Median_face_boxFalse/UBFC_UBFC_UBFC_RhythmMamba_With_Generalized_Epoch29.pth"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-FRAME_BUFFER = 160
+FRAME_BUFFER = 128
 
 # ======================
 # LOAD MODEL
