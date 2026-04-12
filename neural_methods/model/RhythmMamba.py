@@ -27,8 +27,10 @@ class Generalization_Stem(nn.Module):
           x [N,D,C,H,W] (after color projection and normalization)
         """
         
+        x = x.permute(0, 2, 1, 3, 4).contiguous()  # [N,C,D,H,W]
         x = self.color_proj(x)
         x = self.norm(x)
+        x = x.permute(0, 2, 1, 3, 4).contiguous()  # [N,D,C,H,W]
         
         return x
     
