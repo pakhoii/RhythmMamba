@@ -21,13 +21,15 @@ class Generalization_Stem(nn.Module):
         
         # 1. KHỞI TẠO CÓ CHỦ ĐÍCH (GUIDED INITIALIZATION) - Cực kỳ quan trọng
         # Ép mô hình chú ý vào kênh Green (Index 1) thay vì xào trộn ngẫu nhiên
+        """
         with torch.no_grad():
             self.color_proj.weight.data = torch.tensor([
                 [[[0.2]], [[0.6]], [[0.2]]],  # Feature map 1: Nhấn mạnh Green
                 [[[0.0]], [[1.0]], [[0.0]]],  # Feature map 2: Thuần Green
                 [[[0.3]], [[0.4]], [[0.3]]]   # Feature map 3: Mix đều 3 kênh
             ])
-            
+        """
+ 
         # 2. CHUẨN HÓA KHÔNG GIAN (InstanceNorm2d)
         # Chỉ chuẩn hóa trên H và W, tuyệt đối không đụng vào D
         self.norm = nn.InstanceNorm2d(out_channels, affine=True)
@@ -323,7 +325,7 @@ class RhythmMamba(nn.Module):
         super().__init__()
         self.embed_dim = embed_dim
 
-        self.Generalization_Stem = Generalization_Stem()
+#        self.Generalization_Stem = Generalization_Stem()
         self.Fusion_Stem = Fusion_Stem(dim=embed_dim//4)
         self.attn_mask = Attention_mask()
 
@@ -359,7 +361,7 @@ class RhythmMamba(nn.Module):
     def forward(self, x):
         B, D, C, H, W = x.shape
 
-        x = self.Generalization_Stem(x)
+        # x = self.Generalization_Stem(x)
         x = self.Fusion_Stem(x)    #[N*D C H/8 W/8]
         x = x.view(B,D,self.embed_dim//4,H//8,W//8).permute(0,2,1,3,4)
         x = self.stem3(x)
