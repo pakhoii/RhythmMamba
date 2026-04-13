@@ -15,12 +15,9 @@ from mamba_ssm.modules.mamba_simple import Mamba
 class Generalization_Stem(nn.Module):
     def __init__(self, in_channels=3, out_channels=3):
         super(Generalization_Stem, self).__init__()
-        
-        # Chuyển sang dùng Conv2d vì ta sẽ xử lý độc lập từng frame
+
         self.color_proj = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0, bias=False)
         
-        # 1. KHỞI TẠO CÓ CHỦ ĐÍCH (GUIDED INITIALIZATION) - Cực kỳ quan trọng
-        # Ép mô hình chú ý vào kênh Green (Index 1) thay vì xào trộn ngẫu nhiên
         """
         with torch.no_grad():
             self.color_proj.weight.data = torch.tensor([
@@ -29,9 +26,7 @@ class Generalization_Stem(nn.Module):
                 [[[0.3]], [[0.4]], [[0.3]]]   # Feature map 3: Mix đều 3 kênh
             ])
         """
- 
-        # 2. CHUẨN HÓA KHÔNG GIAN (InstanceNorm2d)
-        # Chỉ chuẩn hóa trên H và W, tuyệt đối không đụng vào D
+        
         self.norm = nn.InstanceNorm2d(out_channels, affine=True)
         
     def forward(self, x):
@@ -42,17 +37,10 @@ class Generalization_Stem(nn.Module):
           x [N, D, C, H, W] (after color projection and spatial normalization)
         """
         N, D, C, H, W = x.shape
-        
-        # Ép về 4D để xử lý từng frame độc lập qua Conv2d và Norm2d
+
         x = x.view(N * D, C, H, W)
-        
-        # Chiếu không gian màu
         x = self.color_proj(x)
-        
-        # Chuẩn hóa độ sáng từng frame
         x = self.norm(x)
-        
-        # Trả lại shape 5D ban đầu để tương thích với Fusion_Stem
         x = x.view(N, D, -1, H, W)
         
         return x
@@ -325,7 +313,7 @@ class RhythmMamba(nn.Module):
         super().__init__()
         self.embed_dim = embed_dim
 
-#        self.Generalization_Stem = Generalization_Stem()
+        self.Generalization_Stem = Generalization_Stem()
         self.Fusion_Stem = Fusion_Stem(dim=embed_dim//4)
         self.attn_mask = Attention_mask()
 
@@ -361,7 +349,7 @@ class RhythmMamba(nn.Module):
     def forward(self, x):
         B, D, C, H, W = x.shape
 
-        # x = self.Generalization_Stem(x)
+        x = self.Generalization_Stem(x)
         x = self.Fusion_Stem(x)    #[N*D C H/8 W/8]
         x = x.view(B,D,self.embed_dim//4,H//8,W//8).permute(0,2,1,3,4)
         x = self.stem3(x)
