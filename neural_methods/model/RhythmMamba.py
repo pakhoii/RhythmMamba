@@ -16,42 +16,31 @@ class Generalization_Stem(nn.Module):
     def __init__(self, in_channels=3, out_channels=3):
         super(Generalization_Stem, self).__init__()
 
-        # To define the new color space 
-        # (model can learn which color channels are most informative for rPPG and reconstruct the special color space)
         self.color_proj = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0, bias=False)
         
-        # Normalization layer to stabilize training and help the model learn better representations
+        """
+        with torch.no_grad():
+            self.color_proj.weight.data = torch.tensor([
+                [[[0.2]], [[0.6]], [[0.2]]],  # Feature map 1: Nhấn mạnh Green
+                [[[0.0]], [[1.0]], [[0.0]]],  # Feature map 2: Thuần Green
+                [[[0.3]], [[0.4]], [[0.3]]]   # Feature map 3: Mix đều 3 kênh
+            ])
+        """
+        
         self.norm = nn.InstanceNorm2d(out_channels, affine=True)
         
-        # A quality gate to suppress bad frames
-        self.quality_gate = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
-            nn.Flatten(),
-            nn.Linear(out_channels, out_channels, bias=False),
-            nn.Sigmoid()
-        )   
-        
-        # Amplify the signals
-        self.contrast_weight = nn.Parameter(torch.ones(out_channels))
-        
     def forward(self, x):
+        """Definition of Generalization_Stem.
+        Args:
+          x [N, D, C, H, W]
+        Returns:
+          x [N, D, C, H, W] (after color projection and spatial normalization)
+        """
         N, D, C, H, W = x.shape
+
         x = x.view(N * D, C, H, W)
-        
-        # Color projection
         x = self.color_proj(x)
-        
-        # Spatial normalize (giải quyết lighting variation)
         x = self.norm(x)
-        
-        # Frame quality weighting
-        gate = self.quality_gate(x)                        # [N*D, C]
-        x = x * gate.view(N * D, -1, 1, 1)
-        
-        # Contrast enhancement per channel
-        w = torch.sigmoid(self.contrast_weight)            # [C]
-        x = x * w.view(1, -1, 1, 1)
-        
         x = x.view(N, D, -1, H, W)
         
         return x
@@ -360,7 +349,7 @@ class RhythmMamba(nn.Module):
     def forward(self, x):
         B, D, C, H, W = x.shape
 
-        # x = self.Generalization_Stem(x)
+        x = self.Generalization_Stem(x)
         x = self.Fusion_Stem(x)    #[N*D C H/8 W/8]
         x = x.view(B,D,self.embed_dim//4,H//8,W//8).permute(0,2,1,3,4)
         x = self.stem3(x)
