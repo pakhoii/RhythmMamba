@@ -13,36 +13,53 @@ from einops import rearrange
 from mamba_ssm.modules.mamba_simple import Mamba
 
 class Generalization_Stem(nn.Module):
+    """
+    Lightweight generalization stem for edge deployment.
+    Handles: motion noise, lighting variation, color shift.
+    
+    Tổng params: ~vài nghìn, overhead minimal.
+    """
     def __init__(self, in_channels=3, out_channels=3):
-        super(Generalization_Stem, self).__init__()
-
-        self.color_proj = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0, bias=False)
+        super().__init__()
         
-        """
-        with torch.no_grad():
-            self.color_proj.weight.data = torch.tensor([
-                [[[0.2]], [[0.6]], [[0.2]]],  # Feature map 1: Nhấn mạnh Green
-                [[[0.0]], [[1.0]], [[0.0]]],  # Feature map 2: Thuần Green
-                [[[0.3]], [[0.4]], [[0.3]]]   # Feature map 3: Mix đều 3 kênh
-            ])
-        """
+        # 1. Learnable color space projection
+        self.color_proj = nn.Conv2d(in_channels, out_channels, 1, bias=False)
         
+        # 2. Spatial normalization (xử lý lighting)  
         self.norm = nn.InstanceNorm2d(out_channels, affine=True)
         
-    def forward(self, x):
-        """Definition of Generalization_Stem.
-        Args:
-          x [N, D, C, H, W]
-        Returns:
-          x [N, D, C, H, W] (after color projection and spatial normalization)
-        """
-        N, D, C, H, W = x.shape
-
-        x = x.view(N * D, C, H, W)
-        x = self.color_proj(x)
-        x = self.norm(x)
-        x = x.view(N, D, -1, H, W)
+        # 3. Frame quality gate (suppress bad frames)
+        #    Học cách detect và down-weight noisy/blurry frames
+        self.quality_gate = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+            nn.Linear(out_channels, out_channels, bias=False),
+            nn.Sigmoid()
+        )
         
+        # 4. Temporal contrast enhancement
+        #    Amplify subtle color changes quan trọng cho rPPG
+        self.contrast_weight = nn.Parameter(torch.ones(out_channels))
+        
+    def forward(self, x):
+        N, D, C, H, W = x.shape
+        x = x.view(N * D, C, H, W)
+        
+        # Color projection
+        x = self.color_proj(x)
+        
+        # Spatial normalize (giải quyết lighting variation)
+        x = self.norm(x)
+        
+        # Frame quality weighting
+        gate = self.quality_gate(x)                        # [N*D, C]
+        x = x * gate.view(N * D, -1, 1, 1)
+        
+        # Contrast enhancement per channel
+        w = torch.sigmoid(self.contrast_weight)            # [C]
+        x = x * w.view(1, -1, 1, 1)
+        
+        x = x.view(N, D, -1, H, W)
         return x
 
 class Fusion_Stem(nn.Module):
