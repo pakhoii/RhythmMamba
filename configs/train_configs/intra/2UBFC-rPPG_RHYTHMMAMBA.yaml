@@ -1,34 +1,35 @@
 BASE: ['']
 TOOLBOX_MODE: "train_and_test"      # "train_and_test"  or "only_test"
 TRAIN:
-  BATCH_SIZE: 4
+  BATCH_SIZE: 32
   EPOCHS: 30
-  LR: 3e-4
+  LR: 6e-4
   MODEL_FILE_NAME: UBFC_UBFC_UBFC_RhythmMamba_With_Generalized
   AUG: 1
   DATA:
     FS: 30
     DATASET: UBFC
-    DO_PREPROCESS: False                # Đổi thành True cho lần chạy đầu tiên để tạo cache
+    DO_PREPROCESS: True
     DATA_FORMAT: NDCHW
-    DATA_PATH: "./data/UBFC-rPPG/"     # Cập nhật đường dẫn Raw dataset
-    CACHED_PATH: "./data/cached/UBFC/" # Cập nhật đường dẫn lưu dataset sau khi xử lý
+    DATA_PATH: "./data/UBFC-rPPG/"
+    CACHED_PATH: "./data/cached/UBFC/"
     EXP_DATA_NAME: ""
     BEGIN: 0.0
     END: 0.72
-    PREPROCESS :
+    PREPROCESS:
       DATA_TYPE: [ 'Standardized' ]
+      DATA_AUG: [ 'Motion' ]
       LABEL_TYPE: Standardized
       DO_CHUNK: True
-      CHUNK_LENGTH: 128
+      CHUNK_LENGTH: 160
       CROP_FACE:
         DO_CROP_FACE: True
         USE_LARGE_FACE_BOX: True
         LARGE_BOX_COEF: 1.5
         DETECTION:
           DO_DYNAMIC_DETECTION: False
-          DYNAMIC_DETECTION_FREQUENCY : 30
-          USE_MEDIAN_FACE_BOX: False    
+          DYNAMIC_DETECTION_FREQUENCY: 30
+          USE_MEDIAN_FACE_BOX: False
       RESIZE:
         H: 128
         W: 128
@@ -36,55 +37,57 @@ VALID:
   DATA:
     FS: 30
     DATASET: UBFC
-    DO_PREPROCESS: False              # Đổi thành True cho lần chạy đầu tiên để tạo cache
+    DO_PREPROCESS: True ]
     DATA_FORMAT: NDCHW
-    DATA_PATH: "./data/UBFC-rPPG/"     # Cập nhật đường dẫn Raw dataset
-    CACHED_PATH: "./data/cached/UBFC/" # Cập nhật đường dẫn lưu cache
+    DATA_PATH: "./data/UBFC-rPPG/"
+    CACHED_PATH: "./data/cached/UBFC/"
     EXP_DATA_NAME: ""
     BEGIN: 0.72
     END: 1.0
     PREPROCESS:
       DATA_TYPE: [ 'Standardized' ]
+      DATA_AUG: [ 'Motion' ]
       LABEL_TYPE: Standardized
       DO_CHUNK: True
-      CHUNK_LENGTH: 128
+      CHUNK_LENGTH: 160
       CROP_FACE:
         DO_CROP_FACE: True
         USE_LARGE_FACE_BOX: True
         LARGE_BOX_COEF: 1.5
         DETECTION:
           DO_DYNAMIC_DETECTION: False
-          DYNAMIC_DETECTION_FREQUENCY : 30
-          USE_MEDIAN_FACE_BOX: False    
+          DYNAMIC_DETECTION_FREQUENCY: 30
+          USE_MEDIAN_FACE_BOX: False
       RESIZE:
         H: 128
         W: 128
 TEST:
   METRICS: ['MAE','RMSE','MAPE','Pearson','SNR']
-  USE_LAST_EPOCH: True                 # Bài báo RhythmMamba dùng epoch cuối do UBFC không có tập valid thực sự
+  USE_LAST_EPOCH: False
   DATA:
     FS: 30
     DATASET: UBFC
-    DO_PREPROCESS: False               # Đổi thành True
+    DO_PREPROCESS: True
     DATA_FORMAT: NDCHW
-    DATA_PATH: "./data/UBFC-rPPG/"     # Cập nhật đường dẫn Raw dataset
-    CACHED_PATH: "./data/cached/UBFC/" # Cập nhật đường dẫn lưu cache
+    DATA_PATH: "./data/UBFC-rPPG/"
+    CACHED_PATH: "./data/cached/UBFC/"
     EXP_DATA_NAME: ""
     BEGIN: 0.72
     END: 1.0
     PREPROCESS:
       DATA_TYPE: [ 'Standardized' ]
+      DATA_AUG: [ 'Motion' ]
       LABEL_TYPE: Standardized
       DO_CHUNK: True
-      CHUNK_LENGTH: 128
+      CHUNK_LENGTH: 160
       CROP_FACE:
         DO_CROP_FACE: True
         USE_LARGE_FACE_BOX: True
         LARGE_BOX_COEF: 1.5
         DETECTION:
           DO_DYNAMIC_DETECTION: False
-          DYNAMIC_DETECTION_FREQUENCY : 30
-          USE_MEDIAN_FACE_BOX: False    
+          DYNAMIC_DETECTION_FREQUENCY: 30
+          USE_MEDIAN_FACE_BOX: False
       RESIZE:
         H: 128
         W: 128
@@ -98,8 +101,8 @@ MODEL:
   MODEL_DIR: "./PreTrainedModels"
 INFERENCE:
   BATCH_SIZE: 2
-  EVALUATION_METHOD: "FFT"        
+  EVALUATION_METHOD: "FFT"
   EVALUATION_WINDOW:
-    USE_SMALLER_WINDOW: False        
-    WINDOW_SIZE: 10        
-  MODEL_PATH:   ""
+    USE_SMALLER_WINDOW: False
+    WINDOW_SIZE: 10
+  MODEL_PATH: ""
