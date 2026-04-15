@@ -4,7 +4,7 @@ TRAIN:
   BATCH_SIZE: 32
   EPOCHS: 30
   LR: 6e-4
-  MODEL_FILE_NAME: UBFC_UBFC_UBFC_RhythmMamba_With_Generalized
+  MODEL_FILE_NAME: UBFC_UBFC_UBFC_RhythmMambaWithGeneralizedAug
   AUG: 1
   DATA:
     FS: 30
@@ -37,7 +37,7 @@ VALID:
   DATA:
     FS: 30
     DATASET: UBFC
-    DO_PREPROCESS: True ]
+    DO_PREPROCESS: True
     DATA_FORMAT: NDCHW
     DATA_PATH: "./data/UBFC-rPPG/"
     CACHED_PATH: "./data/cached/UBFC/"
