@@ -12,58 +12,69 @@ import math
 from einops import rearrange
 from mamba_ssm.modules.mamba_simple import Mamba
 
-# class Generalization_Stem(nn.Module):
-#     def __init__(self, in_channels=3, out_channels=3):
-#         super().__init__()
 
-#         self.color_proj = nn.Conv2d(in_channels, out_channels, 1, bias=False)
-#         self.norm = nn.InstanceNorm2d(out_channels, affine=True)
-#         # self.quality_gate = nn.Sequential(
-#         #     nn.AdaptiveAvgPool2d(1),
-#         #     nn.Flatten(),
-#         #     nn.Linear(out_channels, out_channels, bias=False),
-#         #     nn.Sigmoid()
-#         # )
-#         self.contrast_weight = nn.Parameter(torch.ones(out_channels))
-        
-#     def forward(self, x):
-#         N, D, C, H, W = x.shape
-#         x = x.view(N * D, C, H, W)
-
-#         x = self.color_proj(x)
-
-#         x = self.norm(x)
-
-#         # gate = self.quality_gate(x)
-#         # x = x * gate.view(N * D, -1, 1, 1)
-
-#         w = torch.sigmoid(self.contrast_weight)
-#         x = x * w.view(1, -1, 1, 1)
-        
-#         x = x.view(N, D, -1, H, W)
-#         return x
-
-class GeneralizationStem(nn.Module):
-    def __init__(self, in_channels=3, out_channels=3):
+class IllumNorm(nn.Module):
+    def __init__(self, channels=3, eps=1e-5):
         super().__init__()
-        self.color_proj = nn.Conv2d(in_channels, out_channels, 1, bias=False)
-        self.gate = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(out_channels, out_channels, 1),
-            nn.Sigmoid()
-        )
-        self.alpha = nn.Parameter(torch.tensor(0.1))
+        self.eps = eps
+        self.conv = nn.Conv2d(channels, 1, kernel_size=3, padding=1, bias=False)
 
     def forward(self, x):
         N, D, C, H, W = x.shape
-        z = x.view(N * D, C, H, W)
-        y = self.color_proj(z)
-        g = self.gate(y)
-        y = y * g
-        y = y.view(N, D, -1, H, W)
-        return x + self.alpha * y
-    
+        x_4d = x.contiguous().view(N * D, C, H, W)
+        x_4d = torch.clamp(x_4d, min=1e-6)
 
+        illum = self.conv(x_4d)
+        illum = F.softplus(illum)
+        illum = F.avg_pool2d(illum, kernel_size=15, stride=1, padding=7)
+        illum = illum.expand(-1, C, -1, -1)
+
+        x_log = torch.log(x_4d)
+        illum_log = torch.log(illum + self.eps)
+        x_norm = torch.exp(x_log - illum_log)
+        x_norm = x_norm.view(N, D, C, H, W)
+
+        return x_norm
+
+
+class LightSE(nn.Module):
+    def __init__(self, channels=3, reduction=1):
+        super().__init__()
+        hidden = max(channels // reduction, 1)
+        self.fc1 = nn.Linear(channels, hidden, bias=False)
+        self.fc2 = nn.Linear(hidden, channels, bias=False)
+
+    def forward(self, x):
+        w = F.adaptive_avg_pool2d(x, 1).flatten(1)
+        w = F.relu(self.fc1(w))
+        w = torch.sigmoid(self.fc2(w))
+        return x * w.unsqueeze(-1).unsqueeze(-1)
+
+
+class AdaptiveStem(nn.Module):
+    def __init__(self, channels=3):
+        super().__init__()
+        self.color_proj = nn.Conv2d(channels, channels, kernel_size=1, bias=False)
+        self.se = LightSE(channels)
+        self.illum_norm = IllumNorm(channels)
+        self.logits = nn.Parameter(torch.tensor([2.5, -1.0, -2.0]))
+
+    def forward(self, x):
+        N, D, C, H, W = x.shape
+        x_4d = x.contiguous().view(N * D, C, H, W)
+
+        x_color = self.color_proj(x_4d)
+        x_color = self.se(x_color)
+        x_color = x_color.view(N, D, C, H, W)
+
+        x_illum = self.illum_norm(x)
+
+        weights = torch.softmax(self.logits, dim=0)
+        out = weights[0] * x + weights[1] * x_color + weights[2] * x_illum
+
+        return out
+    
+        
 class Fusion_Stem(nn.Module):
     def __init__(self,apha=0.5,belta=0.5,dim=24):
         super(Fusion_Stem, self).__init__()
@@ -241,27 +252,19 @@ class Block_mamba(nn.Module):
 
     def forward(self, x):
         B, D, C = x.size()
-        
         #Multi-temporal Parallelization
         path = 3
         segment = 2**(path-1)
         tt = D // segment
-        
         x_r = x.repeat(segment,1,1)
         x_o = x_r.clone()
         for i in range(1,segment):
             x_o[i*B:(i+1)*B,:D-i*tt,:] = x_r[i*B:(i+1)*B,i*tt:,:]
-            
-  
         x_o = self.attn(x_o)
-        
-        
         for i in range(1,segment):
             for j in range(i):
                 x_o[0:B, tt*i: tt*(i+1) , :] = x_o[0:B, tt*i: tt*(i+1) , :] + x_o[B*(j+1):B*(j+2), tt*(i-j-1): tt*(i-j) , :]
             x_o[0:B, tt*i: tt*(i+1) , :] = x_o[0:B, tt*i: tt*(i+1) , :] / (i+1)
-        
-        
         x = x + self.drop_path(self.norm1(x_o[0:B]))
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
@@ -332,7 +335,6 @@ class RhythmMamba(nn.Module):
         super().__init__()
         self.embed_dim = embed_dim
 
-        # self.Generalization_Stem = Generalization_Stem()
         self.Fusion_Stem = Fusion_Stem(dim=embed_dim//4)
         self.attn_mask = Attention_mask()
 
@@ -368,7 +370,6 @@ class RhythmMamba(nn.Module):
     def forward(self, x):
         B, D, C, H, W = x.shape
 
-        # x = self.Generalization_Stem(x)
         x = self.Fusion_Stem(x)    #[N*D C H/8 W/8]
         x = x.view(B,D,self.embed_dim//4,H//8,W//8).permute(0,2,1,3,4)
         x = self.stem3(x)
