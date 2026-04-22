@@ -13,6 +13,67 @@ from einops import rearrange
 from mamba_ssm.modules.mamba_simple import Mamba
 
 
+# class IllumNorm(nn.Module):
+#     def __init__(self, channels=3, eps=1e-5):
+#         super().__init__()
+#         self.eps = eps
+#         self.conv = nn.Conv2d(channels, 1, kernel_size=3, padding=1, bias=False)
+
+#     def forward(self, x):
+#         N, D, C, H, W = x.shape
+#         x_4d = x.contiguous().view(N * D, C, H, W)
+#         x_4d = torch.clamp(x_4d, min=1e-6)
+
+#         illum = self.conv(x_4d)
+#         illum = F.softplus(illum)
+#         illum = F.avg_pool2d(illum, kernel_size=15, stride=1, padding=7)
+#         illum = illum.expand(-1, C, -1, -1)
+
+#         x_log = torch.log(x_4d)
+#         illum_log = torch.log(illum + self.eps)
+#         x_norm = torch.exp(x_log - illum_log)
+#         x_norm = x_norm.view(N, D, C, H, W)
+
+#         return x_norm
+
+
+# class LightSE(nn.Module):
+#     def __init__(self, channels=3, reduction=1):
+#         super().__init__()
+#         hidden = max(channels // reduction, 1)
+#         self.fc1 = nn.Linear(channels, hidden, bias=False)
+#         self.fc2 = nn.Linear(hidden, channels, bias=False)
+
+#     def forward(self, x):
+#         w = F.adaptive_avg_pool2d(x, 1).flatten(1)
+#         w = F.relu(self.fc1(w))
+#         w = torch.sigmoid(self.fc2(w))
+#         return x * w.unsqueeze(-1).unsqueeze(-1)
+
+
+# class AdaptiveStem(nn.Module):
+#     def __init__(self, channels=3):
+#         super().__init__()
+#         self.color_proj = nn.Conv2d(channels, channels, kernel_size=1, bias=False)
+#         self.se = LightSE(channels)
+#         self.illum_norm = IllumNorm(channels)
+#         self.logits = nn.Parameter(torch.tensor([2.5, -1.0, -2.0]))
+
+#     def forward(self, x):
+#         N, D, C, H, W = x.shape
+#         x_4d = x.contiguous().view(N * D, C, H, W)
+
+#         x_color = self.color_proj(x_4d)
+#         x_color = self.se(x_color)
+#         x_color = x_color.view(N, D, C, H, W)
+
+#         x_illum = self.illum_norm(x)
+
+#         weights = torch.softmax(self.logits, dim=0)
+#         out = weights[0] * x + weights[1] * x_color + weights[2] * x_illum
+
+#         return out
+    
 class IllumNorm(nn.Module):
     def __init__(self, channels=3, eps=1e-5):
         super().__init__()
@@ -24,20 +85,34 @@ class IllumNorm(nn.Module):
         x_4d = x.contiguous().view(N * D, C, H, W)
         x_4d = torch.clamp(x_4d, min=1e-6)
 
-        illum = self.conv(x_4d)
-        illum = F.softplus(illum)
-        illum = F.avg_pool2d(illum, kernel_size=15, stride=1, padding=7)
-        illum = illum.expand(-1, C, -1, -1)
-
-        x_log = torch.log(x_4d)
-        illum_log = torch.log(illum + self.eps)
+        # Trích xuất ánh sáng thô trên từng frame
+        illum_4d = self.conv(x_4d)
+        illum_4d = F.softplus(illum_4d)
+        
+        # Đưa về 5D để làm mượt cả Không gian lẫn THỜI GIAN
+        illum_5d = illum_4d.view(N, 1, D, H, W) # [N, C=1, D, H, W]
+        
+        # Dùng 3D Pool: Làm mượt không gian (15x15) và mượt thời gian (kéo 3 frames)
+        # Điều này đảm bảo bản đồ ánh sáng không bị giật nhấp nháy giữa các frame
+        illum_5d = F.avg_pool3d(
+            illum_5d, 
+            kernel_size=(3, 15, 15), 
+            stride=1, 
+            padding=(1, 7, 7)
+        )
+        
+        illum_5d = illum_5d.expand(-1, C, -1, -1, -1) # [N, C, D, H, W]
+        
+        x_log = torch.log(x.clamp(min=1e-6))
+        illum_log = torch.log(illum_5d + self.eps)
+        
+        # Tính toán trên không gian 5D
         x_norm = torch.exp(x_log - illum_log)
-        x_norm = x_norm.view(N, D, C, H, W)
 
         return x_norm
 
 
-class LightSE(nn.Module):
+class TemporalLightSE(nn.Module):
     def __init__(self, channels=3, reduction=1):
         super().__init__()
         hidden = max(channels // reduction, 1)
@@ -45,35 +120,52 @@ class LightSE(nn.Module):
         self.fc2 = nn.Linear(hidden, channels, bias=False)
 
     def forward(self, x):
-        w = F.adaptive_avg_pool2d(x, 1).flatten(1)
+        # x shape: [N, D, C, H, W]
+        N, D, C, H, W = x.shape
+        
+        # TÍNH TOÁN THEO CLIP (Temporal + Spatial Mean)
+        # Tính trung bình toàn bộ không gian H, W
+        w = x.mean(dim=(3, 4)) # -> [N, D, C]
+        # Tiếp tục tính trung bình dọc theo trục thời gian D
+        w = w.mean(dim=1)      # -> [N, C]
+        
+        # Mạng nơ-ron học trọng số dựa trên màu da tổng thể của cả đoạn video
         w = F.relu(self.fc1(w))
-        w = torch.sigmoid(self.fc2(w))
-        return x * w.unsqueeze(-1).unsqueeze(-1)
+        w = torch.sigmoid(self.fc2(w)) # -> [N, C]
+        
+        # Áp dụng CÙNG MỘT trọng số cho mọi frame trong clip
+        # Tránh hoàn toàn việc nhiễu đạo hàm d(w)/dt
+        w = w.view(N, 1, C, 1, 1)
+        
+        return x * w
 
 
 class AdaptiveStem(nn.Module):
     def __init__(self, channels=3):
         super().__init__()
         self.color_proj = nn.Conv2d(channels, channels, kernel_size=1, bias=False)
-        self.se = LightSE(channels)
+        self.se = TemporalLightSE(channels)
         self.illum_norm = IllumNorm(channels)
         self.logits = nn.Parameter(torch.tensor([2.5, -1.0, -2.0]))
 
     def forward(self, x):
         N, D, C, H, W = x.shape
+
+        # Branch 1: Không gian màu tĩnh (Static Spatial)
         x_4d = x.contiguous().view(N * D, C, H, W)
-
-        x_color = self.color_proj(x_4d)
+        x_color_4d = self.color_proj(x_4d)
+        x_color = x_color_4d.view(N, D, C, H, W)
+        
+        # Áp dụng SE dựa trên Clip-level
         x_color = self.se(x_color)
-        x_color = x_color.view(N, D, C, H, W)
 
+        # Branch 2: Ánh sáng mượt theo thời gian (Temporally-smoothed Illum)
         x_illum = self.illum_norm(x)
 
         weights = torch.softmax(self.logits, dim=0)
         out = weights[0] * x + weights[1] * x_color + weights[2] * x_illum
 
         return out
-    
         
 class Fusion_Stem(nn.Module):
     def __init__(self,apha=0.5,belta=0.5,dim=24):
