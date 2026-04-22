@@ -335,6 +335,7 @@ class RhythmMamba(nn.Module):
         super().__init__()
         self.embed_dim = embed_dim
 
+        self.adaptive_stem = AdaptiveStem()
         self.Fusion_Stem = Fusion_Stem(dim=embed_dim//4)
         self.attn_mask = Attention_mask()
 
@@ -370,6 +371,7 @@ class RhythmMamba(nn.Module):
     def forward(self, x):
         B, D, C, H, W = x.shape
 
+        x = self.adaptive_stem(x)
         x = self.Fusion_Stem(x)    #[N*D C H/8 W/8]
         x = x.view(B,D,self.embed_dim//4,H//8,W//8).permute(0,2,1,3,4)
         x = self.stem3(x)
