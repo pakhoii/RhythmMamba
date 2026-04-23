@@ -85,15 +85,13 @@ class IllumNorm(nn.Module):
         x_4d = x.contiguous().view(N * D, C, H, W)
         x_4d = torch.clamp(x_4d, min=1e-6)
 
-        # Trích xuất ánh sáng thô trên từng frame
+        # Trích xuất ánh sáng thô
         illum_4d = self.conv(x_4d)
         illum_4d = F.softplus(illum_4d)
         
-        # Đưa về 5D để làm mượt cả Không gian lẫn THỜI GIAN
-        illum_5d = illum_4d.view(N, 1, D, H, W) # [N, C=1, D, H, W]
+        # Đưa về dạng [N, C=1, D, H, W] để hàm 3D Pool hiểu được
+        illum_5d = illum_4d.view(N, 1, D, H, W) 
         
-        # Dùng 3D Pool: Làm mượt không gian (15x15) và mượt thời gian (kéo 3 frames)
-        # Điều này đảm bảo bản đồ ánh sáng không bị giật nhấp nháy giữa các frame
         illum_5d = F.avg_pool3d(
             illum_5d, 
             kernel_size=(3, 15, 15), 
@@ -101,12 +99,15 @@ class IllumNorm(nn.Module):
             padding=(1, 7, 7)
         )
         
-        illum_5d = illum_5d.expand(-1, C, -1, -1, -1) # [N, C, D, H, W]
+        # SỬA LỖI TẠI ĐÂY: Trả trục D và C về lại vị trí cũ -> [N, D, 1, H, W]
+        illum_5d = illum_5d.permute(0, 2, 1, 3, 4)
         
+        # Clamp x trước khi log để an toàn tuyệt đối
         x_log = torch.log(x.clamp(min=1e-6))
         illum_log = torch.log(illum_5d + self.eps)
         
-        # Tính toán trên không gian 5D
+        # x_log: [N, D, 3, H, W] trừ đi illum_log: [N, D, 1, H, W]
+        # PyTorch sẽ tự động broadcast (nhân bản) kênh 1 ra cho cả 3 kênh màu
         x_norm = torch.exp(x_log - illum_log)
 
         return x_norm
