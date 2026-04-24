@@ -10,11 +10,12 @@ from evaluation.metrics import calculate_metrics
 from neural_methods.model.RhythmMamba import  RhythmMamba
 from neural_methods.trainer.BaseTrainer import BaseTrainer
 from neural_methods.loss.TorchLossComputer import Hybrid_Loss
+from torch.utils.tensorboard import SummaryWriter
 
 class RhythmMambaTrainer(BaseTrainer):
 
     def __init__(self, config, data_loader):
-        super().__init__()
+        super().__init__()        
         self.device = torch.device(config.DEVICE)
         self.max_epoch_num = config.TRAIN.EPOCHS
         self.model_dir = config.MODEL.MODEL_DIR
@@ -28,6 +29,10 @@ class RhythmMambaTrainer(BaseTrainer):
         self.diff_flag = 0
         self.data_dict = {}
         self.dataset = config.TRAIN.DATA.DATASET
+        
+        self.writer = SummaryWriter(log_dir=os.path.join(self.model_dir, 'tensorboard_logs'))
+    
+        
         if config.TRAIN.DATA.PREPROCESS.LABEL_TYPE == "DiffNormalized":
             self.diff_flag = 1
         if config.TOOLBOX_MODE == "train_and_test":
@@ -81,10 +86,18 @@ class RhythmMambaTrainer(BaseTrainer):
                 self.optimizer.step()
                 self.scheduler.step()
                 tbar.set_postfix(loss=loss.item())
+                
+                global_step = epoch * self.num_train_batches + idx
+                self.writer.add_scalar('Loss/train', loss.item(), global_step)
+                self.writer.add_scalar('LR', self.scheduler.get_last_lr()[0], global_step)
+                
             self.save_model(epoch)
             if not self.config.TEST.USE_LAST_EPOCH: 
                 valid_loss = self.valid(data_loader)
                 print('validation loss: ', valid_loss)
+                
+                self.writer.add_scalar('Loss/valid', valid_loss, epoch)
+                
                 if self.min_valid_loss is None:
                     self.min_valid_loss = valid_loss
                     self.best_epoch = epoch
@@ -93,6 +106,9 @@ class RhythmMambaTrainer(BaseTrainer):
                     self.min_valid_loss = valid_loss
                     self.best_epoch = epoch
                     print("Update best model! Best epoch: {}".format(self.best_epoch))
+        
+        self.writer.close()
+        
         if not self.config.TEST.USE_LAST_EPOCH: 
             print("best trained epoch: {}, min_val_loss: {}".format(self.best_epoch, self.min_valid_loss))  
 
