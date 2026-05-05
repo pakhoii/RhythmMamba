@@ -4,7 +4,7 @@ TRAIN:
   BATCH_SIZE: 16
   EPOCHS: 30
   LR: 3e-4
-  MODEL_FILE_NAME: RhythmMambaVer3
+  MODEL_FILE_NAME: UBFC_RhythmMamba
   AUG: 1
   DATA:
     FS: 30
