@@ -135,7 +135,7 @@ class TemporalShift(nn.Module):
     def forward(self, x):
         N, D, C_in, H_in, W_in = x.shape
         
-        x = x.view(N * D, C_in, H_in, W_in)
+        x = x.reshape(N * D, C_in, H_in, W_in)
         x = self.stem1(x)
 
         _, C_new, H_new, W_new = x.shape
