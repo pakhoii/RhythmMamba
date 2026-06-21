@@ -9,9 +9,7 @@ from neural_methods.model.RhythmMamba import RhythmMamba
 # ======================
 # CONFIG
 # ======================
-# MODEL_PATH = "PreTrainedModels/UBFC_cross_RhythmMamba.pth"
-# MODEL_PATH = "PreTrainedModels/UBFC_SizeW128_SizeH128_ClipLength160_DataTypeStandardized_DataAugNone_LabelTypeStandardized_Crop_faceTrue_Large_boxTrue_Large_size1.5_Dyamic_DetFalse_det_len30_Median_face_boxFalse/RhythmMambaVer2_Epoch25.pth"
-MODEL_PATH = "PreTrainedModels/UBFC_SizeW128_SizeH128_ClipLength160_DataTypeStandardized_DataAugNone_LabelTypeStandardized_Crop_faceTrue_Large_boxTrue_Large_size1.5_Dyamic_DetFalse_det_len30_Median_face_boxFalse/RhythmMambaVer3_Epoch27.pth"
+MODEL_PATH = "PreTrainedModels/UBFC_SizeW128_SizeH128_ClipLength160_DataTypeRaw_DataAugNone_LabelTypeRaw_Crop_faceTrue_Large_boxTrue_Large_size1.5_Dyamic_DetFalse_det_len30_Median_face_boxFalse/UBFC_RhythmMamba_Ver2_Epoch27.pth"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 FRAME_BUFFER = 160
 INFER_STRIDE = 15
