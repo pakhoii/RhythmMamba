@@ -69,33 +69,8 @@ class AdaptiveStem(nn.Module):
         super(AdaptiveStem, self).__init__()
         self.temporal_norm = TemporalNorm(eps=eps)
         
-        # self.color_proj = nn.Conv3d(channels, channels, kernel_size=1) # Can be removed
-        
-        # Decide which channel is more important (Attention mechanism)
-        # self.lightSE = nn.Sequential(
-        #     nn.AdaptiveAvgPool3d((None,1,1)),
-        #     nn.Conv3d(channels, channels//4, kernel_size=1),
-        #     nn.ReLU(inplace=True),
-        #     nn.Conv3d(channels//4, channels, kernel_size=1),
-        #     nn.Sigmoid()
-        # )
-
-        # Ver 2: dual-branch fusion with learnable weights.
-        # branch_a uses color_proj, branch_b uses lightSE modulation.
-        # self.alpha = nn.Parameter(torch.tensor(0.5, dtype=torch.float32))
-        # self.beta = nn.Parameter(torch.tensor(0.5, dtype=torch.float32))
-        
     def forward(self, x):
         x = self.temporal_norm(x)
-        # Ver 1
-        # x = self.color_proj(x)
-        # x = x * self.lightSE(x)
-        
-        # Ver 2: parallel branches with learnable fusion weights.
-        # x_a = self.color_proj(x)
-        # x_b = x * self.lightSE(x)
-        # x = self.alpha * x_a + self.beta * x_b
-        
         return x
 
 
@@ -122,15 +97,6 @@ class TemporalShift(nn.Module):
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2, ceil_mode=False)
         )
-        
-        # Test
-        # self.se = nn.Sequential(
-        #     nn.AdaptiveAvgPool2d(1),
-        #     nn.Conv2d(dim, dim//4, kernel_size=1),
-        #     nn.ReLU(inplace=True),
-        #     nn.Conv2d(dim//4, dim, kernel_size=1),
-        #     nn.Sigmoid()
-        # )
         
     def forward(self, x):
         N, D, C_in, H_in, W_in = x.shape
@@ -159,67 +125,6 @@ class TemporalShift(nn.Module):
         out = self.stem2(out)
         
         return out
-
-
-# class Fusion_Stem(nn.Module):
-#     def __init__(self,apha=0.5,belta=0.5,dim=24):
-#         super(Fusion_Stem, self).__init__()
-
-
-#         self.stem11 = nn.Sequential(nn.Conv2d(3, dim//2, kernel_size=7, stride=2, padding=3),
-#             nn.BatchNorm2d(dim//2, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
-#             nn.ReLU(inplace=True),
-#             nn.MaxPool2d(kernel_size=2, stride=2, ceil_mode=False)
-#             )
-        
-#         self.stem12 = nn.Sequential(nn.Conv2d(12, dim//2, kernel_size=7, stride=2, padding=3),
-#             nn.BatchNorm2d(dim//2),
-#             nn.ReLU(inplace=True),
-#             nn.MaxPool2d(kernel_size=2, stride=2, ceil_mode=False)
-#             )
-
-#         self.stem21 =nn.Sequential(
-#             nn.Conv2d(dim//2, dim, kernel_size=7, stride=1, padding=3),
-#             nn.BatchNorm2d(dim),
-#             nn.ReLU(inplace=True),
-#             nn.MaxPool2d(kernel_size=2, stride=2, ceil_mode=False)
-#         )
-
-#         self.stem22 =nn.Sequential(
-#             nn.Conv2d(dim//2, dim, kernel_size=7, stride=1, padding=3),
-#             nn.BatchNorm2d(dim),
-#             nn.ReLU(inplace=True),
-#             nn.MaxPool2d(kernel_size=2, stride=2, ceil_mode=False)
-#         )
-
-#         self.apha = apha
-#         self.belta = belta
-
-#     def forward(self, x):
-#         """Definition of Fusion_Stem.
-#         Args:
-#           x [N,D,C,H,W]
-#         Returns:
-#           fusion_x [N*D,C,H/8,W/8]
-#         """
-#         N, D, C, H, W = x.shape
-#         x1 = torch.cat([x[:,:1,:,:,:],x[:,:1,:,:,:],x[:,:D-2,:,:,:]],1)
-#         x2 = torch.cat([x[:,:1,:,:,:],x[:,:D-1,:,:,:]],1)
-#         x3 = x
-#         x4 = torch.cat([x[:,1:,:,:,:],x[:,D-1:,:,:,:]],1)
-#         x5 = torch.cat([x[:,2:,:,:,:],x[:,D-1:,:,:,:],x[:,D-1:,:,:,:]],1)
-#         x_diff = self.stem12(torch.cat([x2-x1,x3-x2,x4-x3,x5-x4],2).view(N * D, 12, H, W))
-#         x3 = x3.contiguous().view(N * D, C, H, W)
-#         x = self.stem11(x3)
-
-#         #fusion layer1
-#         x_path1 = self.apha*x + self.belta*x_diff
-#         x_path1 = self.stem21(x_path1)
-#         #fusion layer2
-#         x_path2 = self.stem22(x_diff)
-#         x = self.apha*x_path1 + self.belta*x_path2
-
-#         return x
     
 
 class Attention_mask(nn.Module):
@@ -462,7 +367,6 @@ class RhythmMamba(nn.Module):
         # Adaptive Stem
         x = self.Adaptive_Stem(x)
 
-        # x = self.Fusion_Stem(x)    #[N*D C H/8 W/8]
         x = self.TemporalShift(x)  #[N*D C H/8 W/8]
         x = x.view(B,D,self.embed_dim//4,H//8,W//8).permute(0,2,1,3,4)
         x = self.stem3(x)
