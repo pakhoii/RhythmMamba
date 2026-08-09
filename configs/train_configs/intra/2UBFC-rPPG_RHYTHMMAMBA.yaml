@@ -1,10 +1,10 @@
 BASE: ['']
 TOOLBOX_MODE: "train_and_test"      # "train_and_test"  or "only_test"
 TRAIN:
-  BATCH_SIZE: 16
+  BATCH_SIZE: 50
   EPOCHS: 30
-  LR: 3e-4
-  MODEL_FILE_NAME: UBFC_RhythmMamba_Ver2
+  LR: 4e-4
+  MODEL_FILE_NAME: UBFC_RhythmMamba_Original
   AUG: 1
   DATA:
     FS: 30
@@ -17,8 +17,8 @@ TRAIN:
     BEGIN: 0.0
     END: 0.72
     PREPROCESS:
-      DATA_TYPE: [ 'Raw' ]
-      LABEL_TYPE: Raw
+      DATA_TYPE: [ 'Standardized' ]
+      LABEL_TYPE: Standardized
       DO_CHUNK: True
       CHUNK_LENGTH: 160
       CROP_FACE:
@@ -44,8 +44,8 @@ VALID:
     BEGIN: 0.72
     END: 1.0
     PREPROCESS:
-      DATA_TYPE: [ 'Raw' ]
-      LABEL_TYPE: Raw
+      DATA_TYPE: [ 'Standardized' ]
+      LABEL_TYPE: Standardized
       DO_CHUNK: True
       CHUNK_LENGTH: 160
       CROP_FACE:
@@ -73,8 +73,8 @@ TEST:
     BEGIN: 0.72
     END: 1.0
     PREPROCESS:
-      DATA_TYPE: [ 'Raw' ]
-      LABEL_TYPE: Raw
+      DATA_TYPE: [ 'Standardized' ]
+      LABEL_TYPE: Standardized
       DO_CHUNK: True
       CHUNK_LENGTH: 160
       CROP_FACE:

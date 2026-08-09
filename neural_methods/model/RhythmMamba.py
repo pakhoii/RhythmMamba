@@ -12,119 +12,65 @@ import math
 from einops import rearrange
 from mamba_ssm.modules.mamba_simple import Mamba
 
-
-class TemporalNorm(nn.Module):
-    """Temporal Normalization Block from: https://arxiv.org/html/2411.15283
-        
-        Detrending step:
-            P_detrended = (I - X (X^T X)^{-1} X^T) P = D @ P
-             
-        RMS normalization step:
-            P_norm = P_detrended / sqrt(mean(P_detrended^2) + eps)
-    """
-
-    def __init__(self, eps=1e-6):
-        super(TemporalNorm, self).__init__()
-        self.eps = eps
-        self._cache = {} # key: (T, device, dtype), value: D matrix
-
-    def _get_detrend_matrix(self, T, device, dtype):
-        key = (T, device.type, dtype)
-        if key in self._cache:
-            return self._cache[key]
-
-        t = torch.arange(T, dtype=dtype, device=device).unsqueeze(1)
-        ones = torch.ones(T, 1, dtype=dtype, device=device)
-        X = torch.cat([ones, t], dim=1)
-
-        XtX_inv = torch.linalg.pinv(X.T @ X)
-        H = X @ XtX_inv @ X.T
-
-        D = torch.eye(T, dtype=dtype, device=device) - H
-        self._cache[key] = D
-        
-        return D
-        
-    def forward(self, x):
-        N, D, C, H, W = x.shape
-        
-        A = self._get_detrend_matrix(D, x.device, x.dtype)  # [D, D]
-        
-        # Detrending
-        x_flat = x.permute(1, 0, 2, 3, 4).reshape(D, -1)   # [D, N*C*H*W]
-        x_detrended = A @ x_flat                             # [D, N*C*H*W]
-        
-        # RMS normalization
-        rms = torch.sqrt(
-            torch.mean(x_detrended ** 2, dim=0, keepdim=True) + self.eps
-        )
-        x_normalized = x_detrended / rms
-        
-        x_normalized = x_normalized.reshape(D, N, C, H, W).permute(1, 0, 2, 3, 4)
-        return x_normalized
-    
-
-class AdaptiveStem(nn.Module):
-    def __init__(self, channels=3, eps=1e-6):
-        super(AdaptiveStem, self).__init__()
-        self.temporal_norm = TemporalNorm(eps=eps)
-        
-    def forward(self, x):
-        x = self.temporal_norm(x)
-        return x
+class Fusion_Stem(nn.Module):
+    def __init__(self,apha=0.5,belta=0.5,dim=24):
+        super(Fusion_Stem, self).__init__()
 
 
-class TemporalShift(nn.Module):
-    """
-        Temporal Shift Module from: https://arxiv.org/pdf/2006.03790 
-        Combined with Fusion_Stem design logic
-    """
-    def __init__(self, fold_div=3, dim=24):
-        super(TemporalShift, self).__init__()
-        self.fold_div = fold_div
-        self.dim = dim
-        
-        self.stem1 = nn.Sequential(
-            nn.Conv2d(3, dim//2, kernel_size=7, stride=2, padding=3),
+        self.stem11 = nn.Sequential(nn.Conv2d(3, dim//2, kernel_size=7, stride=2, padding=3),
             nn.BatchNorm2d(dim//2, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2, ceil_mode=False)
-        )
+            )
         
-        self.stem2 = nn.Sequential(
+        self.stem12 = nn.Sequential(nn.Conv2d(12, dim//2, kernel_size=7, stride=2, padding=3),
+            nn.BatchNorm2d(dim//2),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2, stride=2, ceil_mode=False)
+            )
+
+        self.stem21 =nn.Sequential(
             nn.Conv2d(dim//2, dim, kernel_size=7, stride=1, padding=3),
             nn.BatchNorm2d(dim),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2, ceil_mode=False)
         )
-        
+
+        self.stem22 =nn.Sequential(
+            nn.Conv2d(dim//2, dim, kernel_size=7, stride=1, padding=3),
+            nn.BatchNorm2d(dim),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2, stride=2, ceil_mode=False)
+        )
+
+        self.apha = apha
+        self.belta = belta
+
     def forward(self, x):
-        N, D, C_in, H_in, W_in = x.shape
-        
-        x = x.reshape(N * D, C_in, H_in, W_in)
-        x = self.stem1(x)
+        """Definition of Fusion_Stem.
+        Args:
+          x [N,D,C,H,W]
+        Returns:
+          fusion_x [N*D,C,H/8,W/8]
+        """
+        N, D, C, H, W = x.shape
+        x1 = torch.cat([x[:,:1,:,:,:],x[:,:1,:,:,:],x[:,:D-2,:,:,:]],1)
+        x2 = torch.cat([x[:,:1,:,:,:],x[:,:D-1,:,:,:]],1)
+        x3 = x
+        x4 = torch.cat([x[:,1:,:,:,:],x[:,D-1:,:,:,:]],1)
+        x5 = torch.cat([x[:,2:,:,:,:],x[:,D-1:,:,:,:],x[:,D-1:,:,:,:]],1)
+        x_diff = self.stem12(torch.cat([x2-x1,x3-x2,x4-x3,x5-x4],2).view(N * D, 12, H, W))
+        x3 = x3.contiguous().view(N * D, C, H, W)
+        x = self.stem11(x3)
 
-        _, C_new, H_new, W_new = x.shape
-        
-        x = x.reshape(N, D, C_new, H_new, W_new)
-        out = x.clone()
-        
-        fold = C_new // self.fold_div
+        #fusion layer1
+        x_path1 = self.apha*x + self.belta*x_diff
+        x_path1 = self.stem21(x_path1)
+        #fusion layer2
+        x_path2 = self.stem22(x_diff)
+        x = self.apha*x_path1 + self.belta*x_path2
 
-        # Shift forward (t+1 -> t)
-        out[:, :-1, :fold, :, :] = x[:, 1:, :fold, :, :]
-        
-        # Shift backward (t-1 -> t)
-        out[:, 1:, fold:2*fold, :, :] = x[:, :-1, fold:2*fold, :, :]
-        
-        # Keep the rest unchanged
-        # ...
-            
-        out = out.view(N * D, C_new, H_new, W_new)
-        # out = self.se(out) * out
-        out = self.stem2(out)
-        
-        return out
+        return x
     
 
 class Attention_mask(nn.Module):
@@ -325,11 +271,8 @@ class RhythmMamba(nn.Module):
         kwargs.update(factory_kwargs) 
         super().__init__()
         self.embed_dim = embed_dim
-        
-        self.Adaptive_Stem = AdaptiveStem()
-        
-        # self.Fusion_Stem = Fusion_Stem(dim=embed_dim//4)
-        self.TemporalShift = TemporalShift(dim=embed_dim//4)
+
+        self.Fusion_Stem = Fusion_Stem(dim=embed_dim//4)
         self.attn_mask = Attention_mask()
 
         self.stem3 = nn.Sequential(
@@ -363,11 +306,8 @@ class RhythmMamba(nn.Module):
 
     def forward(self, x):
         B, D, C, H, W = x.shape
-        
-        # Adaptive Stem
-        x = self.Adaptive_Stem(x)
 
-        x = self.TemporalShift(x)  #[N*D C H/8 W/8]
+        x = self.Fusion_Stem(x)    #[N*D C H/8 W/8]
         x = x.view(B,D,self.embed_dim//4,H//8,W//8).permute(0,2,1,3,4)
         x = self.stem3(x)
 
