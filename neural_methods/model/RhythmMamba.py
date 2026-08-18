@@ -12,6 +12,180 @@ import math
 from einops import rearrange
 from mamba_ssm.modules.mamba_simple import Mamba
 
+
+class TraditionalTarvainen(nn.Module):
+    def __init__(self, lam=100):
+        super(TraditionalTarvainen, self).__init__()
+        self.lam = lam  # lambda càng lớn, Receptive Field (cửa sổ trend) càng rộng
+        self._cache = {}
+    
+    def _get_projection_matrix(self, T, device, dtype):
+        key = (T, str(device), dtype)
+        if key in self._cache:
+            return self._cache[key]
+
+        I = torch.eye(T, device=device, dtype=dtype)
+        
+        # Nếu số frame quá ngắn (< 3), không đủ để tính đạo hàm bậc 2
+        if T <= 2:
+            self._cache[key] = I
+            return I
+
+        # Tạo ma trận sai phân bậc 2 (Second-order difference matrix)
+        D2 = torch.zeros((T - 2, T), device=device, dtype=dtype)
+        for i in range(T - 2):
+            D2[i, i] = 1
+            D2[i, i+1] = -2
+            D2[i, i+2] = 1
+
+        # H = (I + lambda^2 * D2^T @ D2)^(-1)
+        H = torch.linalg.inv(I + (self.lam ** 2) * (D2.T @ D2))
+
+        self._cache[key] = H
+        return H
+
+    def forward(self, x):
+        # x : (N, D, C, H, W)
+        N, D, C, H, W = x.shape
+        x_flat = x.permute(0, 3, 4, 2, 1).reshape(-1, C, D)  # (N*H*W, C, D)
+        H_proj = self._get_projection_matrix(D, x.device, x.dtype)
+
+        # Tính toán trend phi tuyến
+        trend = torch.matmul(x_flat, H_proj)
+
+        trend = trend.reshape(N, H, W, C, D).permute(0, 4, 3, 1, 2) # (N, D, C, H, W)
+        
+        x_detrended = x - trend  
+        
+        return x_detrended
+
+
+class MultiLambdaTarvainen(nn.Module):
+    def __init__(self, in_channels=3, latent_channels=16):
+        super(MultiLambdaTarvainen, self).__init__()
+        
+        self.encoder = nn.Sequential(
+            nn.Conv1d(in_channels, latent_channels//2, kernel_size=5, stride=4, padding=2),
+            nn.GELU(),
+            nn.Conv1d(latent_channels//2, latent_channels, kernel_size=3, stride=2, padding=1),
+            nn.GELU(),
+            nn.Conv1d(latent_channels, latent_channels, kernel_size=3, stride=2, padding=1),
+            nn.GELU(),
+            nn.Conv1d(latent_channels, latent_channels, kernel_size=1),
+        )
+        
+        # Input is latent space from encoder, output is the lambda values for each channel (3 channels)
+        self.subnet_lambdas = nn.Sequential(
+            nn.Conv1d(latent_channels, latent_channels, kernel_size=3, stride=1, padding=1),
+            nn.GELU(),
+            nn.Conv1d(latent_channels, latent_channels//2, kernel_size=3, stride=1, padding=1),
+            nn.GELU(),
+            nn.Conv1d(latent_channels//2, in_channels, kernel_size=1),  # Output 3 channels for lambda values
+            nn.Sigmoid()  # Ensure lambda values are positive
+        )
+        
+        self.cache = {}
+        
+    def _get_projection_matrix(self, T, lam, device, dtype):
+        key = (T, lam.item(), str(device), dtype)
+        if key in self.cache:
+            return self.cache[key]
+
+        I = torch.eye(T, device=device, dtype=dtype)
+        
+        if T <= 2:
+            self.cache[key] = I
+            return I
+
+        D2 = torch.zeros((T - 2, T), device=device, dtype=dtype)
+        for i in range(T - 2):
+            D2[i, i] = 1
+            D2[i, i+1] = -2
+            D2[i, i+2] = 1
+
+        H = torch.linalg.inv(I + (lam ** 2) * (D2.T @ D2))
+        self.cache[key] = H
+        return H
+    
+        
+    def forward(self, x):
+        # x : (N, D, C, H, W)
+        N, D, C, H, W = x.shape
+        
+        # Reshape to (N*H*W, C, D) for processing
+        x_flat = x.permute(0, 3, 4, 2, 1).reshape(-1, C, D)  # (N*H*W, C, D)
+        
+        # Encode to get latent representation
+        latent = self.encoder(x_flat)  # (N*H*W, latent_channels, reduced_D)
+        
+        # Predict lambda values for each channel
+        lambdas = self.subnet_lambdas(latent)  # (N*H*W, C)
+        
+        # Apply Tarvainen filtering for each channel with its corresponding lambda
+        trend_list = []
+        for c in range(C):
+            lam_c = lambdas[:, c].mean() * 100  # Scale lambda to a reasonable range
+            H_proj = self._get_projection_matrix(D, lam_c, x.device, x.dtype)
+            trend_c = torch.matmul(x_flat[:, c:c+1, :], H_proj)  # (N*H*W, 1, D)
+            trend_list.append(trend_c)
+
+        trend = torch.cat(trend_list, dim=1)  # (N*H*W, C, D)
+        
+        trend = trend.reshape(N, H, W, C, D).permute(0, 4, 3, 1, 2) # (N, D, C, H, W)
+        x_detrended = x - trend
+        return x_detrended
+
+class TemporalShift(nn.Module):
+    """
+        Temporal Shift Module from: https://arxiv.org/pdf/2006.03790 
+        Combined with Fusion_Stem design logic
+    """
+    def __init__(self, fold_div=3, dim=24):
+        super(TemporalShift, self).__init__()
+        self.fold_div = fold_div
+        self.dim = dim
+        
+        self.stem1 = nn.Sequential(
+            nn.Conv2d(3, dim//2, kernel_size=7, stride=2, padding=3),
+            nn.BatchNorm2d(dim//2, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
+            nn.ReLU(inplace=True)
+        )
+        
+        self.stem2 = nn.Sequential(
+            nn.Conv2d(dim//2, dim, kernel_size=7, stride=1, padding=3),
+            nn.BatchNorm2d(dim),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2, stride=2, ceil_mode=False)
+        )
+        
+    def forward(self, x):
+        N, D, C_in, H_in, W_in = x.shape
+        
+        x = x.reshape(N * D, C_in, H_in, W_in)
+        x = self.stem1(x)
+
+        _, C_new, H_new, W_new = x.shape
+        
+        x = x.reshape(N, D, C_new, H_new, W_new)
+        out = x.clone()
+        
+        fold = C_new // self.fold_div
+
+        # Shift forward (t+1 -> t)
+        out[:, :-1, :fold, :, :] = x[:, 1:, :fold, :, :]
+        
+        # Shift backward (t-1 -> t)
+        out[:, 1:, fold:2*fold, :, :] = x[:, :-1, fold:2*fold, :, :]
+        
+        # Keep the rest unchanged
+        # ...
+            
+        out = out.view(N * D, C_new, H_new, W_new)
+        out = self.stem2(out)
+        
+        return out
+
+
 class Fusion_Stem(nn.Module):
     def __init__(self,apha=0.5,belta=0.5,dim=24):
         super(Fusion_Stem, self).__init__()
@@ -272,7 +446,9 @@ class RhythmMamba(nn.Module):
         super().__init__()
         self.embed_dim = embed_dim
 
-        self.Fusion_Stem = Fusion_Stem(dim=embed_dim//4)
+        # self.Fusion_Stem = Fusion_Stem(dim=embed_dim//4)
+        self.detrend = MultiLambdaTarvainen(in_channels=3, latent_channels=16)
+        self.temporal_shift = TemporalShift(fold_div=3, dim=embed_dim//4)
         self.attn_mask = Attention_mask()
 
         self.stem3 = nn.Sequential(
@@ -307,7 +483,9 @@ class RhythmMamba(nn.Module):
     def forward(self, x):
         B, D, C, H, W = x.shape
 
-        x = self.Fusion_Stem(x)    #[N*D C H/8 W/8]
+        # x = self.Fusion_Stem(x)    #[N*D C H/8 W/8]
+        x = self.detrend(x)  # Detrend the input
+        x = self.temporal_shift(x)  # Apply temporal shift
         x = x.view(B,D,self.embed_dim//4,H//8,W//8).permute(0,2,1,3,4)
         x = self.stem3(x)
 
