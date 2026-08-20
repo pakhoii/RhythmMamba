@@ -61,79 +61,71 @@ class TraditionalTarvainen(nn.Module):
 
 
 class MultiLambdaTarvainen(nn.Module):
-    def __init__(self, in_channels=3, latent_channels=16):
-        super(MultiLambdaTarvainen, self).__init__()
-        
+    def __init__(self, in_channels=3, latent_channels=16, T=160,
+                 lambda_min=1.0, lambda_max=100.0):
+        super().__init__()
+        self.T = T
+        self.lambda_min = lambda_min
+        self.lambda_max = lambda_max
+
         self.encoder = nn.Sequential(
-            nn.Conv1d(in_channels, latent_channels//2, kernel_size=5, stride=4, padding=2),
+            nn.Conv1d(in_channels, latent_channels // 2, kernel_size=5, stride=4, padding=2),
             nn.GELU(),
-            nn.Conv1d(latent_channels//2, latent_channels, kernel_size=3, stride=2, padding=1),
+            nn.Conv1d(latent_channels // 2, latent_channels, kernel_size=3, stride=2, padding=1),
             nn.GELU(),
             nn.Conv1d(latent_channels, latent_channels, kernel_size=3, stride=2, padding=1),
             nn.GELU(),
             nn.Conv1d(latent_channels, latent_channels, kernel_size=1),
         )
-        
-        # Input is latent space from encoder, output is the lambda values for each channel (3 channels)
+
+        # global pool theo thời gian -> đúng 1 scalar lambda / channel / sample
         self.subnet_lambdas = nn.Sequential(
             nn.Conv1d(latent_channels, latent_channels, kernel_size=3, stride=1, padding=1),
             nn.GELU(),
-            nn.Conv1d(latent_channels, latent_channels//2, kernel_size=3, stride=1, padding=1),
+            nn.Conv1d(latent_channels, latent_channels // 2, kernel_size=3, stride=1, padding=1),
             nn.GELU(),
-            nn.Conv1d(latent_channels//2, in_channels, kernel_size=1),  # Output 3 channels for lambda values
-            nn.Sigmoid()  # Ensure lambda values are positive
+            nn.AdaptiveAvgPool1d(1),
+            nn.Flatten(),
+            nn.Linear(latent_channels // 2, in_channels),   # (B, C)
         )
-        
-        self.cache = {}
-        
-    def _get_projection_matrix(self, T, lam, device, dtype):
-        key = (T, lam.item(), str(device), dtype)
-        if key in self.cache:
-            return self.cache[key]
 
-        I = torch.eye(T, device=device, dtype=dtype)
-        
-        if T <= 2:
-            self.cache[key] = I
-            return I
-
-        D2 = torch.zeros((T - 2, T), device=device, dtype=dtype)
+        # ---- eigendecomposition của D2^T D2, tính 1 lần duy nhất ----
+        D2 = torch.zeros(T - 2, T)
         for i in range(T - 2):
-            D2[i, i] = 1
-            D2[i, i+1] = -2
-            D2[i, i+2] = 1
+            D2[i, i], D2[i, i + 1], D2[i, i + 2] = 1, -2, 1
+        D2TD2 = D2.T @ D2                              # (T, T), symmetric PSD, cố định
 
-        H = torch.linalg.inv(I + (lam ** 2) * (D2.T @ D2))
-        self.cache[key] = H
-        return H
-    
-        
+        eigvals, eigvecs = torch.linalg.eigh(D2TD2)     # eigh: ổn định + nhanh cho ma trận đối xứng
+        self.register_buffer("eigvals", eigvals)         # (T,)
+        self.register_buffer("eigvecs", eigvecs)          # (T, T)  = V
+
     def forward(self, x):
-        # x : (N, D, C, H, W)
-        N, D, C, H, W = x.shape
-        
-        # Reshape to (N*H*W, C, D) for processing
-        x_flat = x.permute(0, 3, 4, 2, 1).reshape(-1, C, D)  # (N*H*W, C, D)
-        
-        # Encode to get latent representation
-        latent = self.encoder(x_flat)  # (N*H*W, latent_channels, reduced_D)
-        
-        # Predict lambda values for each channel
-        lambdas = self.subnet_lambdas(latent)  # (N*H*W, C)
-        
-        # Apply Tarvainen filtering for each channel with its corresponding lambda
-        trend_list = []
-        for c in range(C):
-            lam_c = lambdas[:, c].mean() * 100  # Scale lambda to a reasonable range
-            H_proj = self._get_projection_matrix(D, lam_c, x.device, x.dtype)
-            trend_c = torch.matmul(x_flat[:, c:c+1, :], H_proj)  # (N*H*W, 1, D)
-            trend_list.append(trend_c)
+        # x: (N, T, C, H, W)
+        N, T, C, H, W = x.shape
+        assert T == self.T
 
-        trend = torch.cat(trend_list, dim=1)  # (N*H*W, C, D)
-        
-        trend = trend.reshape(N, H, W, C, D).permute(0, 4, 3, 1, 2) # (N, D, C, H, W)
+        x_flat = x.permute(0, 3, 4, 2, 1).reshape(-1, C, T)   # (B, C, T), B = N*H*W
+
+        latent = self.encoder(x_flat)                # (B, latent_channels, T')
+        raw_lambdas = self.subnet_lambdas(latent)     # (B, C)  <-- mỗi sample, mỗi channel 1 lambda
+        lambdas = self.lambda_min + (self.lambda_max - self.lambda_min) * torch.sigmoid(raw_lambdas)
+
+        # --- Tarvainen filter khả vi, vectorized toàn batch + toàn channel ---
+        Vt = self.eigvecs.T                                          # (T, T)
+        x_proj = torch.einsum('ij,bcj->bci', Vt, x_flat)              # V^T x        (B, C, T)
+
+        denom = 1.0 + (lambdas.unsqueeze(-1) ** 2) * self.eigvals.view(1, 1, -1)  # (B, C, T)
+        x_proj_scaled = x_proj / denom
+
+        trend_flat = torch.einsum('ij,bcj->bci', self.eigvecs, x_proj_scaled)     # V (...)  (B, C, T)
+
+        trend = trend_flat.reshape(N, H, W, C, T).permute(0, 4, 3, 1, 2)   # (N, T, C, H, W)
         x_detrended = x - trend
+        # lambdas_out = lambdas.reshape(N, H, W, C)     # trả về để log / regularize
+
+        # return x_detrended, lambdas_out
         return x_detrended
+    
 
 class TemporalShift(nn.Module):
     """
@@ -446,9 +438,10 @@ class RhythmMamba(nn.Module):
         super().__init__()
         self.embed_dim = embed_dim
 
-        # self.Fusion_Stem = Fusion_Stem(dim=embed_dim//4)
+        self.Fusion_Stem = Fusion_Stem(dim=embed_dim//4)
         self.detrend = MultiLambdaTarvainen(in_channels=3, latent_channels=16)
-        self.temporal_shift = TemporalShift(fold_div=3, dim=embed_dim//4)
+        # self.detrend = TraditionalTarvainen(lam=100)
+        # self.temporal_shift = TemporalShift(fold_div=3, dim=embed_dim//4)
         self.attn_mask = Attention_mask()
 
         self.stem3 = nn.Sequential(
@@ -483,9 +476,12 @@ class RhythmMamba(nn.Module):
     def forward(self, x):
         B, D, C, H, W = x.shape
 
-        # x = self.Fusion_Stem(x)    #[N*D C H/8 W/8]
         x = self.detrend(x)  # Detrend the input
-        x = self.temporal_shift(x)  # Apply temporal shift
+        x = self.Fusion_Stem(x)    #[N*D C H/8 W/8]
+        # x = self.temporal_shift(x)  # Apply temporal shift
+        # _, C_new, H_new, W_new = x.shape
+        # x = x.view(B, D, C_new, H_new, W_new).permute(0,2,1,3,4)
+        
         x = x.view(B,D,self.embed_dim//4,H//8,W//8).permute(0,2,1,3,4)
         x = self.stem3(x)
 
