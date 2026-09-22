@@ -54,6 +54,23 @@ class Hybrid_Loss(nn.Module):
         loss = 0.2 * loss_time + 1.0 * loss_Fre
         return loss
     
+    
+class Consistency_Loss(nn.Module):
+    def __init__(self):
+        super(Consistency_Loss, self).__init__()
+
+    def forward(self, feature1, feature2):
+        feature1 = feature1.flatten(start_dim=1)
+        feature2 = feature2.flatten(start_dim=1)
+
+        cosine_similarity = F.cosine_similarity(
+            feature1,
+            feature2,
+            dim=1
+        )
+
+        return 1 - cosine_similarity.mean()
+
 class RhythmFormer_Loss(nn.Module): 
     def __init__(self):
         super(RhythmFormer_Loss,self).__init__()

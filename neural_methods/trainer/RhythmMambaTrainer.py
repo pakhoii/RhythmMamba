@@ -9,7 +9,7 @@ from evaluation.post_process import calculate_hr
 from evaluation.metrics import calculate_metrics
 from neural_methods.model.RhythmMamba import  RhythmMamba
 from neural_methods.trainer.BaseTrainer import BaseTrainer
-from neural_methods.loss.TorchLossComputer import Hybrid_Loss
+from neural_methods.loss.TorchLossComputer import Hybrid_Loss, Consistency_Loss
 
 class RhythmMambaTrainer(BaseTrainer):
 
@@ -35,6 +35,7 @@ class RhythmMambaTrainer(BaseTrainer):
             self.model = torch.nn.DataParallel(self.model, device_ids=list(range(config.NUM_OF_GPU_TRAIN)))
             self.num_train_batches = len(data_loader["train"])
             self.criterion = Hybrid_Loss()
+            self.consistency_criterion = Consistency_Loss()
             self.optimizer = optim.AdamW(
                 self.model.parameters(), lr=config.TRAIN.LR, weight_decay=0)
             # See more details on the OneCycleLR scheduler here: https://pytorch.org/docs/stable/generated/torch.optim.lr_scheduler.OneCycleLR.html
@@ -60,23 +61,40 @@ class RhythmMambaTrainer(BaseTrainer):
             tbar = tqdm(data_loader["train"], ncols=80)
             for idx, batch in enumerate(tbar):
                 tbar.set_description("Train epoch %s" % epoch)
+
                 data, labels = batch[0].float(), batch[1].float()
                 N, D, C, H, W = data.shape
 
-                if self.config.TRAIN.AUG :
-                    data,labels = self.data_augmentation(data,labels,batch[2],batch[3])
+                if self.config.TRAIN.AUG:
+                    data_aug, labels_aug = self.data_augmentation_ver2(data, labels)
+                    data_combined = torch.cat((data, data_aug), dim=0)
+                    labels_combined = torch.cat((labels, labels_aug), dim=0)
+                else:
+                    data_combined = data
+                    labels_combined = labels
 
-                data = data.to(self.device)
-                labels = labels.to(self.device)
+                data_combined = data_combined.to(self.device)
+                labels_combined = labels_combined.to(self.device)
 
                 self.optimizer.zero_grad()
-                pred_ppg = self.model(data)
+                pred_ppg, feature_representation = self.model(data_combined)
                 pred_ppg = (pred_ppg-torch.mean(pred_ppg, axis=-1).view(-1, 1))/torch.std(pred_ppg, axis=-1).view(-1, 1)    # normalize
 
-                loss = 0.0
-                for ib in range(N):
-                    loss = loss + self.criterion(pred_ppg[ib], labels[ib], epoch , self.config.TRAIN.DATA.FS , self.diff_flag)
-                loss = loss / N
+                # Main loss: Hybrid loss (time + frequency)
+                main_loss = 0.0
+                for ib in range(data_combined.shape[0]):
+                    main_loss = main_loss + self.criterion(pred_ppg[ib], labels_combined[ib], epoch , self.config.TRAIN.DATA.FS , self.diff_flag)
+                main_loss = main_loss / data_combined.shape[0]  # Average loss over the batch
+
+                if self.config.TRAIN.AUG:
+                    # Consistency loss: Cosine similarity between feature representations of original and augmented data
+                    feature_representation_orig = feature_representation[:N]
+                    feature_representation_aug = feature_representation[N:]
+                    consistency_loss = self.consistency_criterion(feature_representation_orig, feature_representation_aug)
+                    loss = main_loss + 0.1 * consistency_loss  # Total loss with a weight for consistency loss
+                else:
+                    loss = main_loss
+
                 loss.backward()
                 self.optimizer.step()
                 self.scheduler.step()
@@ -94,8 +112,8 @@ class RhythmMambaTrainer(BaseTrainer):
                     self.best_epoch = epoch
                     print("Update best model! Best epoch: {}".format(self.best_epoch))
         if not self.config.TEST.USE_LAST_EPOCH: 
-            print("best trained epoch: {}, min_val_loss: {}".format(self.best_epoch, self.min_valid_loss))  
-
+            print("best trained epoch: {}, min_val_loss: {}".format(self.best_epoch, self.min_valid_loss))
+            
 
     def valid(self, data_loader):
         """ Model evaluation on the validation dataset."""
@@ -112,7 +130,7 @@ class RhythmMambaTrainer(BaseTrainer):
                 vbar.set_description("Validation")
                 data_valid, labels_valid = valid_batch[0].to(self.device), valid_batch[1].to(self.device)
                 N, D, C, H, W = data_valid.shape
-                pred_ppg_valid = self.model(data_valid)
+                pred_ppg_valid, _ = self.model(data_valid)
                 pred_ppg_valid = (pred_ppg_valid-torch.mean(pred_ppg_valid, axis=-1).view(-1, 1))/torch.std(pred_ppg_valid, axis=-1).view(-1, 1)    # normalize
 
                 for ib in range(N):
@@ -158,7 +176,7 @@ class RhythmMambaTrainer(BaseTrainer):
                 batch_size = test_batch[0].shape[0]
                 chunk_len = self.chunk_len
                 data_test, labels_test = test_batch[0].to(self.config.DEVICE), test_batch[1].to(self.config.DEVICE)
-                pred_ppg_test = self.model(data_test)
+                pred_ppg_test, _ = self.model(data_test)
                 pred_ppg_test = (pred_ppg_test-torch.mean(pred_ppg_test, axis=-1).view(-1, 1))/torch.std(pred_ppg_test, axis=-1).view(-1, 1)    # normalize
                 labels_test = labels_test.view(-1, 1)
                 pred_ppg_test = pred_ppg_test.view( -1 , 1)
@@ -223,4 +241,66 @@ class RhythmMambaTrainer(BaseTrainer):
         labels_aug = torch.tensor(labels_aug).float()
         if rand2 < 0.5:
             data_aug = torch.flip(data_aug, dims=[4])
+        return data_aug, labels_aug
+    
+    
+    def data_augmentation_ver2(self, data, labels):
+        N, D, C, H, W = data.shape
+        
+        p_gamma = self.config.TRAIN.AUG_RATE.GAMMA
+        p_light = self.config.TRAIN.AUG_RATE.LIGHT
+        p_framerate = self.config.TRAIN.AUG_RATE.FRAMERATE
+        p_time_delay = self.config.TRAIN.AUG_RATE.TIME_DELAY
+        p_motion = 1 - (p_gamma + p_light + p_framerate + p_time_delay)
+        
+        data_aug = data.clone()
+        labels_aug = labels.clone()
+        
+        for idx in range(N):
+            aug_ratio = random.random()
+            
+            # Motion prior
+            if aug_ratio < p_motion:
+                if p_motion > 0:
+                    h_mask = random.randint(H // 8, H // 4)
+                    w_mask = random.randint(W // 8, W // 4)
+                    h_start = random.randint(0, H - h_mask)
+                    w_start = random.randint(0, W - w_mask)
+                    data_aug[idx, :, :, h_start:h_start + h_mask, w_start:w_start + w_mask] = 0
+            
+            # Frame rate prior
+            elif aug_ratio < p_motion + p_framerate:
+                if p_framerate > 0:
+                    D_new = random.randint(int(D * 0.6), D-1)
+                    tmp = data_aug[idx].unsqueeze(0).permute(0, 2, 1, 3, 4) # N, C, D, H, W
+                    tmp_down = torch.nn.functional.interpolate(tmp, size=(D_new, H, W), mode='trilinear', align_corners=False)
+                    tmp_up = torch.nn.functional.interpolate(tmp_down, size=(D, H, W), mode='trilinear', align_corners=False)
+                    data_aug[idx] = tmp_up.permute(0, 2, 1, 3, 4).squeeze(0) # N, D, C, H, W
+            
+            # Gamma correction
+            elif aug_ratio < p_motion + p_framerate + p_gamma:
+                if p_gamma > 0:
+                    gamma = torch.empty(1).uniform_(0.8, 1.2).to(self.device)
+                    data_aug[idx] = torch.pow(torch.clamp(data_aug[idx], min=1e-6), gamma)
+                    
+            # Light prior
+            elif aug_ratio < (p_motion + p_framerate + p_gamma + p_light):
+                if p_light > 0:
+                    matrix = torch.eye(3) + torch.FloatTensor(3, 3).uniform_(-0.3, 0.3)
+                    data_aug[idx] = torch.einsum('dchw, ic -> dihw', data_aug[idx], matrix.to(self.device))
+                    data_aug[idx] = torch.clamp(data_aug[idx], 0.0, 1.0)
+                    
+            # Time delay prior
+            else:
+                if p_time_delay > 0:
+                    shift = random.randint(1, D // 4)
+                    data_aug[idx] = torch.roll(data_aug[idx], shifts=shift, dims=0)
+                    labels_aug[idx] = torch.roll(labels_aug[idx], shifts=shift, dims=0)
+           
+        
+        # Random horizontal flip    
+        for idx in range(N):
+            if random.random() < 0.5:
+                data_aug[idx] = torch.flip(data_aug[idx], dims=[3])  # Flip along width dimension
+
         return data_aug, labels_aug

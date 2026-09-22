@@ -6,6 +6,15 @@ TRAIN:
   LR: 5e-4
   MODEL_FILE_NAME: UBFC_RhythmMamba
   AUG: 1
+
+  AUG_RATE: # For UBFC dataset
+    GAMMA: 0.1
+    LIGHT: 0.15
+    FRAMERATE: 0.4
+    TIME_DELAY: 0.15
+    # MOTION: the remaining 0.2 is for motion augmentation, which is implemented in the data loader
+
+
   DATA:
     FS: 30
     DATASET: UBFC

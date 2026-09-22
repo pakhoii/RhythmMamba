@@ -310,7 +310,7 @@ class RhythmMamba(nn.Module):
         x = self.Fusion_Stem(x)    #[N*D C H/8 W/8]
         x = x.view(B,D,self.embed_dim//4,H//8,W//8).permute(0,2,1,3,4)
         x = self.stem3(x)
-
+        
         mask = torch.sigmoid(x)
         mask = self.attn_mask(mask)
         x = x * mask
@@ -318,6 +318,8 @@ class RhythmMamba(nn.Module):
         x = torch.mean(x,4)
         x = torch.mean(x,3)
         x = rearrange(x, 'b c t -> b t c')
+        
+        feature_representation = x # Store the feature representation before passing through the blocks
 
         for blk in self.blocks:
             x = blk(x)
@@ -327,4 +329,4 @@ class RhythmMamba(nn.Module):
         rPPG = self.ConvBlockLast(rPPG)    #[N, 1, D]
         rPPG = rPPG.squeeze(1)
 
-        return rPPG
+        return rPPG, feature_representation
