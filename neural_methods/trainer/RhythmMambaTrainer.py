@@ -63,9 +63,13 @@ class RhythmMambaTrainer(BaseTrainer):
                 tbar.set_description("Train epoch %s" % epoch)
 
                 data, labels = batch[0].float(), batch[1].float()
+                data = data.to(self.device)
+                labels = labels.to(self.device)
+                
                 N, D, C, H, W = data.shape
 
                 if self.config.TRAIN.AUG:
+                    print("AUG Called")
                     data_aug, labels_aug = self.data_augmentation_ver2(data, labels)
                     data_combined = torch.cat((data, data_aug), dim=0)
                     labels_combined = torch.cat((labels, labels_aug), dim=0)

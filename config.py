@@ -18,6 +18,11 @@ _C.BASE = ['']
 # -----------------------------------------------------------------------------\
 _C.TOOLBOX_MODE = ""
 _C.TRAIN = CN()
+_C.TRAIN.AUG_RATE = CN()
+_C.TRAIN.AUG_RATE.GAMMA = 0.0
+_C.TRAIN.AUG_RATE.LIGHT = 0.0
+_C.TRAIN.AUG_RATE.FRAMERATE = 0.0
+_C.TRAIN.AUG_RATE.TIME_DELAY = 0.0
 _C.TRAIN.EPOCHS = 50
 _C.TRAIN.BATCH_SIZE = 4
 _C.TRAIN.LR = 1e-4
