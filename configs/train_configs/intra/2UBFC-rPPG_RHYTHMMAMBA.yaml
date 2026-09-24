@@ -1,22 +1,22 @@
 BASE: ['']
 TOOLBOX_MODE: "train_and_test"      # "train_and_test"  or "only_test"
 TRAIN:
-  BATCH_SIZE: 16
+  BATCH_SIZE: 30
   EPOCHS: 30
-  LR: 3e-4
-  MODEL_FILE_NAME: UBFC_UBFC_UBFC_RhythmMamba
+  LR: 5e-4
+  MODEL_FILE_NAME: UBFC_RhythmMamba_Original
   AUG: 1
   DATA:
     FS: 30
-    DATASET: UBFC-rPPG
-    DO_PREPROCESS: False               # if first time, should be true
+    DATASET: UBFC
+    DO_PREPROCESS: False
     DATA_FORMAT: NDCHW
-    DATA_PATH: "/experiment0/user/DataSet/UBFC/"          # Raw dataset path, need to be updated
-    CACHED_PATH: "../dataset/UBFC/"    # Processed dataset save path, need to be updated
+    DATA_PATH: "./data/UBFC-rPPG/"
+    CACHED_PATH: "./data/cached/UBFC/"
     EXP_DATA_NAME: ""
     BEGIN: 0.0
     END: 0.72
-    PREPROCESS :
+    PREPROCESS:
       DATA_TYPE: [ 'Standardized' ]
       LABEL_TYPE: Standardized
       DO_CHUNK: True
@@ -27,19 +27,19 @@ TRAIN:
         LARGE_BOX_COEF: 1.5
         DETECTION:
           DO_DYNAMIC_DETECTION: False
-          DYNAMIC_DETECTION_FREQUENCY : 30
-          USE_MEDIAN_FACE_BOX: False    # This should be used ONLY if dynamic detection is used
+          DYNAMIC_DETECTION_FREQUENCY: 30
+          USE_MEDIAN_FACE_BOX: False
       RESIZE:
         H: 128
         W: 128
 VALID:
   DATA:
     FS: 30
-    DATASET: UBFC-rPPG
-    DO_PREPROCESS: False                  # if first time, should be true
+    DATASET: UBFC
+    DO_PREPROCESS: False
     DATA_FORMAT: NDCHW
-    DATA_PATH: "/experiment0/user/DataSet/UBFC/"          # Raw dataset path, need to be updated
-    CACHED_PATH: "../dataset/UBFC/"    # Processed dataset save path, need to be updated
+    DATA_PATH: "./data/UBFC-rPPG/"
+    CACHED_PATH: "./data/cached/UBFC/"
     EXP_DATA_NAME: ""
     BEGIN: 0.72
     END: 1.0
@@ -54,21 +54,21 @@ VALID:
         LARGE_BOX_COEF: 1.5
         DETECTION:
           DO_DYNAMIC_DETECTION: False
-          DYNAMIC_DETECTION_FREQUENCY : 30
-          USE_MEDIAN_FACE_BOX: False    # This should be used ONLY if dynamic detection is used
+          DYNAMIC_DETECTION_FREQUENCY: 30
+          USE_MEDIAN_FACE_BOX: False
       RESIZE:
         H: 128
         W: 128
 TEST:
   METRICS: ['MAE','RMSE','MAPE','Pearson','SNR']
-  USE_LAST_EPOCH: True                      # to use provided validation dataset to find the best epoch, should be false
+  USE_LAST_EPOCH: False
   DATA:
     FS: 30
-    DATASET: UBFC-rPPG
-    DO_PREPROCESS: False                    # if first time, should be true
+    DATASET: UBFC
+    DO_PREPROCESS: False
     DATA_FORMAT: NDCHW
-    DATA_PATH: "/experiment0/user/DataSet/UBFC/"          # Raw dataset path, need to be updated
-    CACHED_PATH: "../dataset/UBFC/"    # Processed dataset save path, need to be updated
+    DATA_PATH: "./data/UBFC-rPPG/"
+    CACHED_PATH: "./data/cached/UBFC/"
     EXP_DATA_NAME: ""
     BEGIN: 0.72
     END: 1.0
@@ -83,8 +83,8 @@ TEST:
         LARGE_BOX_COEF: 1.5
         DETECTION:
           DO_DYNAMIC_DETECTION: False
-          DYNAMIC_DETECTION_FREQUENCY : 30
-          USE_MEDIAN_FACE_BOX: False    # This should be used ONLY if dynamic detection is used
+          DYNAMIC_DETECTION_FREQUENCY: 30
+          USE_MEDIAN_FACE_BOX: False
       RESIZE:
         H: 128
         W: 128
@@ -95,10 +95,11 @@ LOG:
 MODEL:
   DROP_RATE: 0.2
   NAME: RhythmMamba
+  MODEL_DIR: "./PreTrainedModels"
 INFERENCE:
   BATCH_SIZE: 2
-  EVALUATION_METHOD: "FFT"        # "FFT" or "peak detection"
+  EVALUATION_METHOD: "FFT"
   EVALUATION_WINDOW:
-    USE_SMALLER_WINDOW: False        # Change this if you'd like an evaluation window smaller than the test video length
-    WINDOW_SIZE: 10        # In seconds
-  MODEL_PATH:   ""
+    USE_SMALLER_WINDOW: False
+    WINDOW_SIZE: 10
+  MODEL_PATH: ""
