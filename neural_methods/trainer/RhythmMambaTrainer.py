@@ -4,6 +4,8 @@ import numpy as np
 import torch
 import torch.optim as optim
 import random
+import neural_methods.trainer.utils as utils
+
 from tqdm import tqdm
 from evaluation.post_process import calculate_hr
 from evaluation.metrics import calculate_metrics
@@ -249,62 +251,44 @@ class RhythmMambaTrainer(BaseTrainer):
     
     
     def data_augmentation_ver2(self, data, labels):
-        N, D, C, H, W = data.shape
+        # data shape: (N, D, C, H, W)
+        N = data.shape[0]
         
         p_gamma = self.config.TRAIN.AUG_RATE.GAMMA
         p_light = self.config.TRAIN.AUG_RATE.LIGHT
         p_framerate = self.config.TRAIN.AUG_RATE.FRAMERATE
         p_time_delay = self.config.TRAIN.AUG_RATE.TIME_DELAY
-        p_motion = 1 - (p_gamma + p_light + p_framerate + p_time_delay)
+        p_motion = 1.0 - (p_gamma + p_light + p_framerate + p_time_delay)
         
         data_aug = data.clone()
         labels_aug = labels.clone()
         
-        for idx in range(N):
-            aug_ratio = random.random()
-            
-            # Motion prior
-            if aug_ratio < p_motion:
-                if p_motion > 0:
-                    h_mask = random.randint(H // 8, H // 4)
-                    w_mask = random.randint(W // 8, W // 4)
-                    h_start = random.randint(0, H - h_mask)
-                    w_start = random.randint(0, W - w_mask)
-                    data_aug[idx, :, :, h_start:h_start + h_mask, w_start:w_start + w_mask] = 0
-            
-            # Frame rate prior
-            elif aug_ratio < p_motion + p_framerate:
-                if p_framerate > 0:
-                    D_new = random.randint(int(D * 0.6), D-1)
-                    tmp = data_aug[idx].unsqueeze(0).permute(0, 2, 1, 3, 4) # N, C, D, H, W
-                    tmp_down = torch.nn.functional.interpolate(tmp, size=(D_new, H, W), mode='trilinear', align_corners=False)
-                    tmp_up = torch.nn.functional.interpolate(tmp_down, size=(D, H, W), mode='trilinear', align_corners=False)
-                    data_aug[idx] = tmp_up.permute(0, 2, 1, 3, 4).squeeze(0) # N, D, C, H, W
-            
-            # Gamma correction
-            elif aug_ratio < p_motion + p_framerate + p_gamma:
-                if p_gamma > 0:
-                    gamma = torch.empty(1).uniform_(0.8, 1.2).to(self.device)
-                    data_aug[idx] = torch.pow(torch.clamp(data_aug[idx], min=1e-6), gamma)
-                    
-            # Light prior
-            elif aug_ratio < (p_motion + p_framerate + p_gamma + p_light):
-                if p_light > 0:
-                    matrix = torch.eye(3) + torch.FloatTensor(3, 3).uniform_(-0.3, 0.3)
-                    data_aug[idx] = torch.einsum('dchw, ic -> dihw', data_aug[idx], matrix.to(self.device))
-                    data_aug[idx] = torch.clamp(data_aug[idx], 0.0, 1.0)
-                    
-            # Time delay prior
-            else:
-                if p_time_delay > 0:
-                    shift = random.randint(1, D // 4)
-                    data_aug[idx] = torch.roll(data_aug[idx], shifts=shift, dims=0)
-                    labels_aug[idx] = torch.roll(labels_aug[idx], shifts=shift, dims=0)
-           
+        r = torch.rand(N, device=data.device)
         
-        # Random horizontal flip    
-        for idx in range(N):
-            if random.random() < 0.5:
-                data_aug[idx] = torch.flip(data_aug[idx], dims=[3])  # Flip along width dimension
+        mask_motion = r < p_motion
+        mask_frame  = (r >= p_motion) & (r < p_motion + p_framerate)
+        mask_gamma  = (r >= p_motion + p_framerate) & (r < p_motion + p_framerate + p_gamma)
+        mask_light  = (r >= p_motion + p_framerate + p_gamma) & (r < p_motion + p_framerate + p_gamma + p_light)
+        mask_time_delay = r >= (1.0 - p_time_delay)
+        
+        if mask_motion.any() and p_motion > 0:
+            data_aug[mask_motion] = utils.jitter_affine(data_aug[mask_motion])
+            
+        if mask_frame.any() and p_framerate > 0:
+            data_aug[mask_frame] = utils.frame_drop(data_aug[mask_frame])
 
+        if mask_gamma.any() and p_gamma > 0:
+            data_aug[mask_gamma] = utils.gamma_correction(data_aug[mask_gamma])
+            
+        if mask_light.any() and p_light > 0:
+            data_aug[mask_light] = utils.light_skin_tone_adjustment(data_aug[mask_light])
+        
+        if mask_time_delay.any() and p_time_delay > 0:
+            data_aug[mask_time_delay], labels_aug[mask_time_delay] = utils.time_delay(
+                data_aug[mask_time_delay], 
+                labels_aug[mask_time_delay],
+                fs=self.config.TRAIN.DATA.FS, 
+                max_delay=0.5
+            )
+        
         return data_aug, labels_aug
