@@ -58,19 +58,24 @@ def frame_drop(x, min_ratio=0.8):
 
 
 # Gamma augmentation
-def gamma_correction(x, gamma_range=(0.8, 2.2)):
+def gamma_correction(x, gamma_range=(0.8, 2.2), eps=1e-6):
     """
         Apply random gamma correction to the input tensor
     """
     N, D, C, H, W = x.shape
     gamma_vals = torch.empty((N, 1, 1, 1, 1), device=x.device).uniform_(gamma_range[0], gamma_range[1])
     
-    # Normalize the input to [0, 1]
-    x_norm = x.float() / 255.0
-    x_norm = torch.pow(torch.clamp(x_norm, min=1e-6, max=1.0), gamma_vals)
-    x_gamma = x_norm * 255.0
+    x_min = x.amin(dim=(1, 2, 3, 4), keepdim=True)
+    x_max = x.amax(dim=(1, 2, 3, 4), keepdim=True)
+    x_norm = (x - x_min) / (x_max - x_min + eps)
     
-    return x_gamma
+    x_gamma = torch.pow(torch.clamp(x_norm, min=eps, max=1.0), gamma_vals)
+    
+    mean = x_gamma.mean(dim=(1, 2, 3, 4), keepdim=True)
+    std = x_gamma.std(dim=(1, 2, 3, 4), keepdim=True)
+    x_out = (x_gamma - mean) / (std + eps)
+    
+    return x_out
 
 
 # Light & Skin Tone augmentation
@@ -86,40 +91,14 @@ def light_skin_tone_adjustment(x, noise_level=0.4):
     transform_matrices = (1 - noise_level) * identity + noise_level * noise
     
     x_light = torch.einsum('ndchw,njc->ndjhw', x, transform_matrices)
-    x_light = torch.clamp(x_light, 0, 255)
+
+    mean = x_light.mean(dim=(1, 2, 3, 4), keepdim=True)
+    std = x_light.std(dim=(1, 2, 3, 4), keepdim=True)
+    x_out = (x_light - mean) / (std + 1e-6)
     
-    return x_light
+    return x_out
 
 
 # Time Delay augmentation
 def time_delay(x, labels, fs=30, max_delay=0.5):
-    # x shape: (N, D, C, H, W)
-    # labels shape: (N, D)
-    N, D, C, H, W = x.shape
-
-    max_delay_frames = min(int(max_delay * fs), D - 1)
-
-    delay = torch.randint(1, max_delay_frames + 1, (N,), device=x.device)
-    direction = torch.randint(0, 2, (N,), device=x.device)
-
-    x_delayed = torch.zeros_like(x)
-    labels_delayed = torch.zeros_like(labels)
-
-    for i in range(N):
-        d = delay[i].item()
-
-        if direction[i] == 0:  # forward / shift right
-            x_delayed[i, d:] = x[i, :-d]
-            x_delayed[i, :d] = x[i, :d].flip(0)
-            
-            labels_delayed[i, d:] = labels[i, :-d]
-            labels_delayed[i, :d] = labels[i, :d].flip(0)
-
-        else:  # backward / shift left
-            x_delayed[i, :-d] = x[i, d:]
-            x_delayed[i, -d:] = x[i, -d:].flip(0)
-            
-            labels_delayed[i, :-d] = labels[i, d:]
-            labels_delayed[i, -d:] = labels[i, -d:].flip(0)
-
-    return x_delayed, labels_delayed
+    ...

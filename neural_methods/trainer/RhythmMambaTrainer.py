@@ -60,7 +60,8 @@ class RhythmMambaTrainer(BaseTrainer):
             self.model.train()
 
             # Model Training
-            tbar = tqdm(data_loader["train"], ncols=80)
+            # tbar = tqdm(data_loader["train"], ncols=80)
+            tbar = tqdm(data_loader["train"], dynamic_ncols=True)
             for idx, batch in enumerate(tbar):
                 tbar.set_description("Train epoch %s" % epoch)
 
@@ -71,7 +72,7 @@ class RhythmMambaTrainer(BaseTrainer):
                 N, D, C, H, W = data.shape
 
                 if self.config.TRAIN.AUG:
-                    print("AUG Called")
+                    # print("AUG Called")
                     data_aug, labels_aug = self.data_augmentation_ver2(data, labels)
                     data_combined = torch.cat((data, data_aug), dim=0)
                     labels_combined = torch.cat((labels, labels_aug), dim=0)
@@ -84,6 +85,8 @@ class RhythmMambaTrainer(BaseTrainer):
 
                 self.optimizer.zero_grad()
                 pred_ppg, feature_representation = self.model(data_combined)
+                # print("pred_ppg shape: ", pred_ppg.shape)
+                # print("feature_representation shape: ", feature_representation.shape)
                 pred_ppg = (pred_ppg-torch.mean(pred_ppg, axis=-1).view(-1, 1))/torch.std(pred_ppg, axis=-1).view(-1, 1)    # normalize
 
                 # Main loss: Hybrid loss (time + frequency)
@@ -97,14 +100,21 @@ class RhythmMambaTrainer(BaseTrainer):
                     feature_representation_orig = feature_representation[:N]
                     feature_representation_aug = feature_representation[N:]
                     consistency_loss = self.consistency_criterion(feature_representation_orig, feature_representation_aug)
-                    loss = main_loss + 0.1 * consistency_loss  # Total loss with a weight for consistency loss
+                    loss = main_loss + 0.05 * consistency_loss
                 else:
                     loss = main_loss
+                    consistency_loss = torch.tensor(0.0, device=self.device)
 
                 loss.backward()
                 self.optimizer.step()
                 self.scheduler.step()
-                tbar.set_postfix(loss=loss.item())
+                
+                tbar.set_postfix({
+                    "total": f"{loss.item():.4f}",
+                    "main": f"{main_loss.item():.4f}",
+                    "cons": f"{consistency_loss.item():.4f}",
+                })
+                
             self.save_model(epoch)
             if not self.config.TEST.USE_LAST_EPOCH: 
                 valid_loss = self.valid(data_loader)
@@ -284,11 +294,6 @@ class RhythmMambaTrainer(BaseTrainer):
             data_aug[mask_light] = utils.light_skin_tone_adjustment(data_aug[mask_light])
         
         if mask_time_delay.any() and p_time_delay > 0:
-            data_aug[mask_time_delay], labels_aug[mask_time_delay] = utils.time_delay(
-                data_aug[mask_time_delay], 
-                labels_aug[mask_time_delay],
-                fs=self.config.TRAIN.DATA.FS, 
-                max_delay=0.5
-            )
+            ...
         
         return data_aug, labels_aug
