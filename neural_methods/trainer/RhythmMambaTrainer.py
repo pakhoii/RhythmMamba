@@ -53,6 +53,8 @@ class RhythmMambaTrainer(BaseTrainer):
         """Training routine for model"""
         if data_loader["train"] is None:
             raise ValueError("No data for train")
+        
+        # total_iter = self.max_epoch_num * self.num_train_batches
 
         for epoch in range(self.max_epoch_num):
             print('')
@@ -100,6 +102,14 @@ class RhythmMambaTrainer(BaseTrainer):
                     feature_representation_orig = feature_representation[:N]
                     feature_representation_aug = feature_representation[N:]
                     consistency_loss = self.consistency_criterion(feature_representation_orig, feature_representation_aug)
+                    
+                    # current_iter = epoch * self.num_train_batches + idx
+                    # r = current_iter / max(total_iter - 1, 1)
+                    # lambda_factor = 2.0 / (1.0 + np.exp(-10.0 * r)) - 1
+                    # lambda_factor = 2.0 / (1.0 + np.exp(-10.0 * r))
+                    
+                    # loss = main_loss + lambda_factor * consistency_loss
+                    # loss = main_loss + 0.05 * lambda_factor * consistency_loss
                     loss = main_loss + 0.05 * consistency_loss
                 else:
                     loss = main_loss
