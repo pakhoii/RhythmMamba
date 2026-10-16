@@ -34,27 +34,66 @@ def jitter_affine(x, max_angles=2.0, max_translate=0.03):
 # Frame rate augmentation
 def frame_drop(x, min_ratio=0.8):
     """
-        Randomly drop frames from the input tensor
+    Randomly drop frames from the input tensor.
     """
     N, D, C, H, W = x.shape
-    
+
     drop_ratio = torch.empty(1, device=x.device).uniform_(min_ratio, 0.95).item()
     D_downsampled = int(D * drop_ratio)
-    
-    inner_indices = torch.randperm(D-2, device=x.device)[:D_downsampled-2] + 1
+
+    inner_indices = torch.randperm(D - 2, device=x.device)[:D_downsampled - 2] + 1
     first_index = torch.tensor([0], device=x.device)
-    last_index = torch.tensor([D-1], device=x.device)
-    
+    last_index = torch.tensor([D - 1], device=x.device)
+
     selected_indices = torch.cat((first_index, inner_indices, last_index))
     selected_indices, _ = torch.sort(selected_indices)
-    
-    sampled_x = x[:, selected_indices, :, :, :]
-    sampled_x = sampled_x.permute(0, 2, 1, 3, 4)  # (N, C, D_downsampled, H, W)
-    
-    interpolated_x = F.interpolate(sampled_x, size=(D, H, W), mode='trilinear', align_corners=False)
-    
-    output_x = interpolated_x.permute(0, 2, 1, 3, 4)  # (N, D, C, H, W)
+
+    sampled_x = x[:, selected_indices, :, :, :]  # (N, D_downsampled, C, H, W)
+
+    # Move temporal dimension to the last axis
+    sampled_x = sampled_x.permute(0, 2, 3, 4, 1)  # (N, C, H, W, D_downsampled)
+
+    # Treat each pixel's temporal sequence independently
+    sampled_x = sampled_x.reshape(-1, 1, D_downsampled)
+
+    # Interpolate only along the temporal dimension
+    interpolated_x = F.interpolate(
+        sampled_x,
+        size=D,
+        mode='linear',
+        align_corners=False
+    )
+
+    # Restore original dimensions
+    output_x = interpolated_x.reshape(N, C, H, W, D)
+    output_x = output_x.permute(0, 4, 1, 2, 3)  # (N, D, C, H, W)
+
     return output_x
+
+
+# def frame_drop(x, min_ratio=0.8):
+#     """
+#         Randomly drop frames from the input tensor
+#     """
+#     N, D, C, H, W = x.shape
+    
+#     drop_ratio = torch.empty(1, device=x.device).uniform_(min_ratio, 0.95).item()
+#     D_downsampled = int(D * drop_ratio)
+    
+#     inner_indices = torch.randperm(D-2, device=x.device)[:D_downsampled-2] + 1
+#     first_index = torch.tensor([0], device=x.device)
+#     last_index = torch.tensor([D-1], device=x.device)
+    
+#     selected_indices = torch.cat((first_index, inner_indices, last_index))
+#     selected_indices, _ = torch.sort(selected_indices)
+    
+#     sampled_x = x[:, selected_indices, :, :, :]
+#     sampled_x = sampled_x.permute(0, 2, 1, 3, 4)  # (N, C, D_downsampled, H, W)
+    
+#     interpolated_x = F.interpolate(sampled_x, size=(D, H, W), mode='trilinear', align_corners=False)
+    
+#     output_x = interpolated_x.permute(0, 2, 1, 3, 4)  # (N, D, C, H, W)
+#     return output_x
 
 
 # Gamma augmentation
