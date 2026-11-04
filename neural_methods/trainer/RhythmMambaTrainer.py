@@ -105,8 +105,8 @@ class RhythmMambaTrainer(BaseTrainer):
                     
                     current_iter = epoch * self.num_train_batches + idx
                     r = current_iter / max(total_iter - 1, 1)
-                    # lambda_factor = 2.0 / (1.0 + np.exp(-10.0 * r)) - 1
-                    lambda_factor = 2.0 / (1.0 + np.exp(-10.0 * r))
+                    lambda_factor = 2.0 / (1.0 + np.exp(-10.0 * r)) - 1
+                    # lambda_factor = 2.0 / (1.0 + np.exp(-10.0 * r))
                     
                     # loss = main_loss + lambda_factor * consistency_loss
                     loss = main_loss + 0.05 * lambda_factor * consistency_loss
@@ -278,7 +278,7 @@ class RhythmMambaTrainer(BaseTrainer):
         p_light = self.config.TRAIN.AUG_RATE.LIGHT
         p_framerate = self.config.TRAIN.AUG_RATE.FRAMERATE
         p_time_delay = self.config.TRAIN.AUG_RATE.TIME_DELAY
-        p_motion = 1.0 - (p_gamma + p_light + p_framerate + p_time_delay)
+        p_motion = self.config.TRAIN.AUG_RATE.MOTION
         
         data_aug = data.clone()
         labels_aug = labels.clone()

@@ -32,43 +32,80 @@ def jitter_affine(x, max_angles=2.0, max_translate=0.03):
 
 
 # Frame rate augmentation
-def frame_drop(x, min_ratio=0.8):
+def frame_drop(x, min_ratio=0.85):
     """
-    Randomly drop frames from the input tensor.
+    Simulate frame drop by replacing each dropped frame
+    with the value of the previous valid frame.
+    The first and last frames are always kept.
     """
     N, D, C, H, W = x.shape
+    device = x.device
 
-    drop_ratio = torch.empty(1, device=x.device).uniform_(min_ratio, 0.95).item()
-    D_downsampled = int(D * drop_ratio)
+    keep_ratio = torch.empty(1, device=device).uniform_(min_ratio, 0.95).item()
+    D_keep = max(2, int(D * keep_ratio))
 
-    inner_indices = torch.randperm(D - 2, device=x.device)[:D_downsampled - 2] + 1
-    first_index = torch.tensor([0], device=x.device)
-    last_index = torch.tensor([D - 1], device=x.device)
+    # Randomly select frames, always keeping first and last frames
+    inner_indices = torch.randperm(D - 2, device=device)[:D_keep - 2] + 1
 
-    selected_indices = torch.cat((first_index, inner_indices, last_index))
-    selected_indices, _ = torch.sort(selected_indices)
+    valid_t = torch.cat((
+        torch.tensor([0], device=device, dtype=torch.long),
+        inner_indices,
+        torch.tensor([D - 1], device=device, dtype=torch.long)
+    ))
 
-    sampled_x = x[:, selected_indices, :, :, :]  # (N, D_downsampled, C, H, W)
+    valid_t, _ = torch.sort(valid_t)
 
-    # Move temporal dimension to the last axis
-    sampled_x = sampled_x.permute(0, 2, 3, 4, 1)  # (N, C, H, W, D_downsampled)
+    # Construct frame indices using previous valid frame
+    frame_indices = torch.arange(D, device=device)
 
-    # Treat each pixel's temporal sequence independently
-    sampled_x = sampled_x.reshape(-1, 1, D_downsampled)
+    # Find the previous valid frame for each temporal position
+    positions = torch.searchsorted(valid_t, frame_indices, right=True) - 1
 
-    # Interpolate only along the temporal dimension
-    interpolated_x = F.interpolate(
-        sampled_x,
-        size=D,
-        mode='linear',
-        align_corners=False
-    )
+    # Replace dropped frames with their previous valid frame
+    source_indices = valid_t[positions]
 
-    # Restore original dimensions
-    output_x = interpolated_x.reshape(N, C, H, W, D)
-    output_x = output_x.permute(0, 4, 1, 2, 3)  # (N, D, C, H, W)
+    output_x = x[:, source_indices, :, :, :]
 
     return output_x
+
+
+# def frame_drop(x, min_ratio=0.8):
+#     """
+#     Randomly drop frames from the input tensor.
+#     """
+#     N, D, C, H, W = x.shape
+
+#     drop_ratio = torch.empty(1, device=x.device).uniform_(min_ratio, 0.95).item()
+#     D_downsampled = int(D * drop_ratio)
+
+#     inner_indices = torch.randperm(D - 2, device=x.device)[:D_downsampled - 2] + 1
+#     first_index = torch.tensor([0], device=x.device)
+#     last_index = torch.tensor([D - 1], device=x.device)
+
+#     selected_indices = torch.cat((first_index, inner_indices, last_index))
+#     selected_indices, _ = torch.sort(selected_indices)
+
+#     sampled_x = x[:, selected_indices, :, :, :]  # (N, D_downsampled, C, H, W)
+
+#     # Move temporal dimension to the last axis
+#     sampled_x = sampled_x.permute(0, 2, 3, 4, 1)  # (N, C, H, W, D_downsampled)
+
+#     # Treat each pixel's temporal sequence independently
+#     sampled_x = sampled_x.reshape(-1, 1, D_downsampled)
+
+#     # Interpolate only along the temporal dimension
+#     interpolated_x = F.interpolate(
+#         sampled_x,
+#         size=D,
+#         mode='linear',
+#         align_corners=False
+#     )
+
+#     # Restore original dimensions
+#     output_x = interpolated_x.reshape(N, C, H, W, D)
+#     output_x = output_x.permute(0, 4, 1, 2, 3)  # (N, D, C, H, W)
+
+#     return output_x
 
 
 # def frame_drop(x, min_ratio=0.8):
