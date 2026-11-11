@@ -55,6 +55,70 @@ class Hybrid_Loss(nn.Module):
         return loss
     
     
+# Frequency consistency loss    
+class Freq_Consistency_Loss(nn.Module):
+    def __init__(self, fs=30.0, nfft=1024, min_freq=0.75, max_freq=2.5):
+        super(Freq_Consistency_Loss, self).__init__()
+        self.fs = fs
+        self.nfft = nfft
+        self.min_freq = min_freq
+        self.max_freq = max_freq
+        
+        self.freq_representation_orig = None
+        self.freq_representation_aug = None
+        self.freq_hr = None
+        
+    def get_representations(self):
+        return (
+            self.freq_hr,
+            self.freq_representation_orig,
+            self.freq_representation_aug
+        )
+    
+    def forward(self, feat_ori, feat_aug):
+        N, D, C = feat_ori.shape
+        device = feat_ori.device
+        
+        # DC removal -> Remove the power at 0 Hz
+        # Minus the mean along the temporal dimension
+        feat_ori = feat_ori - torch.mean(feat_ori, dim=1, keepdim=True)
+        feat_aug  = feat_aug  - torch.mean(feat_aug, dim=1, keepdim=True)
+
+        # Compute the FFT along the temporal dimension
+        win = torch.hann_window(D, device=device, dtype=feat_ori.dtype).view(1, D, 1)
+        feat_ori = feat_ori * win
+        feat_aug  = feat_aug  * win
+        fft_ori = torch.fft.rfft(feat_ori, n=self.nfft, dim=1)
+        fft_aug  = torch.fft.rfft(feat_aug,  n=self.nfft, dim=1)
+        
+        # Masking the frequency range of HR (0.75 Hz to 2.5 Hz)
+        freqs = torch.fft.rfftfreq(self.nfft, d=1/self.fs).to(device)
+        mask = (freqs >= self.min_freq) & (freqs <= self.max_freq)
+        fft_ori = fft_ori[:, mask, :]
+        fft_aug  = fft_aug[:, mask, :]
+        
+        # Compute the power spectral density (PSD)
+        psd_ori = torch.abs(fft_ori) ** 2
+        psd_aug  = torch.abs(fft_aug) ** 2
+        
+        # Average the PSD across channels to get a single representation per sample
+        psd_ori_nf = torch.mean(psd_ori, dim=-1)
+        psd_aug_nf  = torch.mean(psd_aug, dim=-1)
+        
+        psd_ori_nf = psd_ori_nf - torch.amin(psd_ori_nf, dim=-1, keepdim=True)
+        psd_aug_nf = psd_aug_nf - torch.amin(psd_aug_nf, dim=-1, keepdim=True)
+        
+        self.freq_representation_orig = F.normalize(psd_ori_nf.detach(), p=2, dim=-1)
+        self.freq_representation_aug  = F.normalize(psd_aug_nf.detach(), p=2, dim=-1)
+        self.freq_hr = freqs[mask].detach()
+        
+        # Calculate the cosine similarity between the two frequency representations
+        cosine_similarity = F.cosine_similarity(psd_ori_nf.detach(), psd_aug_nf, dim=-1, eps=1e-8)
+        
+        return 1 - cosine_similarity.mean()
+
+
+# Time consistency loss
 class Consistency_Loss(nn.Module):
     def __init__(self):
         super(Consistency_Loss, self).__init__()

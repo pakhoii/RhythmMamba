@@ -4,15 +4,15 @@ TRAIN:
   BATCH_SIZE: 16
   EPOCHS: 30
   LR: 3e-4
-  MODEL_FILE_NAME: UBFC_RhythmMamba_AUG_LossTime
+  MODEL_FILE_NAME: UBFC_RhythmMamba_AUG_LossConsFreq
   AUG: 1
 
   AUG_RATE: # For UBFC dataset
     GAMMA: 0.1
-    LIGHT: 0.15
-    FRAMERATE: 0.4
-    TIME_DELAY: 0.15
-    MOTION: 0.2
+    LIGHT: 0.2
+    FRAMERATE: 0.3
+    TIME_DELAY: 0.1
+    MOTION: 0.3
 
   DATA:
     FS: 30

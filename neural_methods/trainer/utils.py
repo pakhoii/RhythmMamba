@@ -1,21 +1,61 @@
 import torch
 import torch.nn.functional as F
 import math
+from evaluation.post_process import calculate_hr
+import random
 
 # Motion augmentation
-def jitter_affine(x, max_angles=2.0, max_translate=0.03):
+# def jitter_affine(x, max_angles=2.0, max_translate=0.03):
+#     """
+#         Apply random affine transformations to the input tensor
+#     """
+#     N, D, C, H, W = x.shape
+#     x = x.contiguous().view(N * D, C, H, W)
+    
+#     # Generate random angles and translations
+#     angles = (torch.rand(N * D, device=x.device) * 2 - 1) * max_angles * math.pi / 180.0
+#     tx = (torch.rand(N * D, device=x.device) * 2 - 1) * max_translate
+#     ty = (torch.rand(N * D, device=x.device) * 2 - 1) * max_translate
+    
+#     affine_matrices = torch.zeros(N * D, 2, 3, device=x.device)
+#     affine_matrices[:, 0, 0] = torch.cos(angles)
+#     affine_matrices[:, 0, 1] = -torch.sin(angles)
+#     affine_matrices[:, 0, 2] = tx
+#     affine_matrices[:, 1, 0] = torch.sin(angles)
+#     affine_matrices[:, 1, 1] = torch.cos(angles)
+#     affine_matrices[:, 1, 2] = ty
+    
+#     grid = F.affine_grid(affine_matrices, x.size(), align_corners=False)
+#     jittered_x = F.grid_sample(x, grid, mode='bilinear', padding_mode='reflection', align_corners=False)
+    
+#     jittered_x = jittered_x.view(N, D, C, H, W)
+    
+#     return jittered_x
+
+
+def jitter_affine(x, max_angles=2.0, max_translate=0.03, knot_step=15):
     """
-        Apply random affine transformations to the input tensor
+    Apply affine transformations with smooth temporal trajectory to the input tensor.
     """
     N, D, C, H, W = x.shape
-    x = x.contiguous().view(N * D, C, H, W)
+    device = x.device
+
+    # Number of knots along the temporal axis (1 knot every knot_step frames)
+    num_knots = max(2, D // knot_step + 1)
     
-    # Generate random angles and translations
-    angles = (torch.rand(N * D, device=x.device) * 2 - 1) * max_angles * math.pi / 180.0
-    tx = (torch.rand(N * D, device=x.device) * 2 - 1) * max_translate
-    ty = (torch.rand(N * D, device=x.device) * 2 - 1) * max_translate
+    # Randomly sample angles and translations at knot points: shape (N, 3, num_knots)
+    knots = torch.rand(N, 3, num_knots, device=device) * 2 - 1
+
+    # Interpolate the knot parameters to get smooth parameters for each frame: shape (N, 3, D)
+    smooth_params = F.interpolate(knots, size=D, mode='linear', align_corners=True)
     
-    affine_matrices = torch.zeros(N * D, 2, 3, device=x.device)
+    angles = (smooth_params[:, 0, :] * max_angles * math.pi / 180.0).reshape(N * D)
+    tx = (smooth_params[:, 1, :] * max_translate).reshape(N * D)
+    ty = (smooth_params[:, 2, :] * max_translate).reshape(N * D)
+    
+    x_flat = x.contiguous().view(N * D, C, H, W)
+    
+    affine_matrices = torch.zeros(N * D, 2, 3, device=device)
     affine_matrices[:, 0, 0] = torch.cos(angles)
     affine_matrices[:, 0, 1] = -torch.sin(angles)
     affine_matrices[:, 0, 2] = tx
@@ -23,12 +63,10 @@ def jitter_affine(x, max_angles=2.0, max_translate=0.03):
     affine_matrices[:, 1, 1] = torch.cos(angles)
     affine_matrices[:, 1, 2] = ty
     
-    grid = F.affine_grid(affine_matrices, x.size(), align_corners=False)
-    jittered_x = F.grid_sample(x, grid, mode='bilinear', padding_mode='reflection', align_corners=False)
+    grid = F.affine_grid(affine_matrices, x_flat.size(), align_corners=False)
+    jittered_x = F.grid_sample(x_flat, grid, mode='bilinear', padding_mode='reflection', align_corners=False)
     
-    jittered_x = jittered_x.view(N, D, C, H, W)
-    
-    return jittered_x
+    return jittered_x.view(N, D, C, H, W)
 
 
 # Frame rate augmentation
@@ -178,3 +216,63 @@ def light_skin_tone_adjustment(x, noise_level=0.4):
 # Time Delay augmentation
 def time_delay(x, labels, fs=30, max_delay=0.5):
     ...
+    
+
+def facial_expression_aug(x, max_warp=0.05, knot_step=10):
+    """
+    Simulate non-rigid facial muscle movements (e.g., talking, facial expressions)
+    via anatomically weighted spatio-temporal elastic grid warping (without shading).
+    """
+    N, D, C, H, W = x.shape
+    device = x.device
+    
+    # 1. Create a coarse 5x5 spatial control grid and temporal control knots
+    grid_size = 5
+    num_knots = max(2, D // knot_step + 1)
+    
+    # Generate random (dx, dy) displacements in [-1, 1] at control knots
+    # Shape: (N, 2, num_knots, 5, 5)
+    disp_knots = torch.rand(N, 2, num_knots, grid_size, grid_size, device=device) * 2 - 1
+    
+    # 2. Apply anatomical spatial weighting mask on the 5x5 grid:
+    # - Outer boundary (indices 0 and 4): 0.0 to anchor image borders.
+    # - Row 1 (forehead/eyes): 0.2 (minimal deformation to preserve clean rPPG ROI).
+    # - Row 2 (cheeks/nose): 0.5 - 0.7 (moderate deformation).
+    # - Row 3 (mouth/jaw): 0.8 - 1.0 (strongest deformation during talking/expressions).
+    anatomical_mask = torch.tensor([
+        [0.0, 0.0, 0.0, 0.0, 0.0],
+        [0.0, 0.2, 0.2, 0.2, 0.0],
+        [0.0, 0.7, 0.5, 0.7, 0.0],
+        [0.0, 0.8, 1.0, 0.8, 0.0],
+        [0.0, 0.0, 0.0, 0.0, 0.0],
+    ], device=device).view(1, 1, 1, grid_size, grid_size)
+    
+    disp_knots = disp_knots * anatomical_mask * max_warp
+    
+    # 3. Trilinear interpolation for smooth spatio-temporal displacement fields
+    # Output shape: (N, 2, D, H, W)
+    disp_field = F.interpolate(
+        disp_knots.view(N * 2, 1, num_knots, grid_size, grid_size),
+        size=(D, H, W),
+        mode='trilinear',
+        align_corners=True
+    ).view(N, 2, D, H, W)
+    
+    # Reshape to (N * D, H, W, 2) to match F.grid_sample coordinate format
+    disp_field = disp_field.permute(0, 2, 3, 4, 1).reshape(N * D, H, W, 2)
+    
+    # 4. Construct base normalized coordinate grid in [-1, 1] and add displacements
+    yy, xx = torch.meshgrid(
+        torch.linspace(-1.0, 1.0, H, device=device),
+        torch.linspace(-1.0, 1.0, W, device=device),
+        indexing='ij'
+    )
+    base_grid = torch.stack([xx, yy], dim=-1).unsqueeze(0)  # (1, H, W, 2)
+    warped_grid = base_grid + disp_field
+    
+    x_flat = x.contiguous().view(N * D, C, H, W)
+    warped_x = F.grid_sample(
+        x_flat, warped_grid, mode='bilinear', padding_mode='reflection', align_corners=True
+    ).view(N, D, C, H, W)
+    
+    return warped_x
