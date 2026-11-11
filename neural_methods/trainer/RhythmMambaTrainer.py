@@ -50,121 +50,6 @@ class RhythmMambaTrainer(BaseTrainer):
             self.model = torch.nn.DataParallel(self.model, device_ids=list(range(config.NUM_OF_GPU_TRAIN)))
         else:
             raise ValueError("EfficientPhys trainer initialized in incorrect toolbox mode!")
-        
-    # def train(self, data_loader):
-    #     """Training routine for model (Version 1: Clean code + OneCycle-aligned lambda)"""
-    #     if data_loader["train"] is None:
-    #         raise ValueError("No data for train")
-
-    #     total_iter = self.max_epoch_num * self.num_train_batches
-
-    #     for epoch in range(self.max_epoch_num):
-    #         print(f"\n====Training Epoch: {epoch}====")
-    #         self.model.train()
-
-    #         epoch_representation_orig = []
-    #         epoch_representation_aug = []
-    #         epoch_freqs = None
-
-    #         running_total = 0.0
-    #         running_main = 0.0
-    #         running_cons = 0.0
-
-    #         tbar = tqdm(data_loader["train"], dynamic_ncols=True)
-    #         for idx, batch in enumerate(tbar):
-    #             tbar.set_description(f"Train epoch {epoch}")
-
-    #             data = batch[0].float().to(self.device)
-    #             labels = batch[1].float().to(self.device)
-    #             N = data.shape[0]
-
-    #             if self.config.TRAIN.AUG:
-    #                 data_aug, labels_aug = self.data_augmentation_ver2(data, labels)
-    #                 data_combined = torch.cat((data, data_aug), dim=0)
-    #                 labels_combined = torch.cat((labels, labels_aug), dim=0)
-    #             else:
-    #                 data_combined = data
-    #                 labels_combined = labels
-
-    #             self.optimizer.zero_grad()
-    #             pred_ppg, feature_representation = self.model(data_combined)
-
-    #             # Z-score normalize predicted PPG along temporal dimension
-    #             pred_ppg = (pred_ppg - torch.mean(pred_ppg, dim=-1, keepdim=True)) / (
-    #                 torch.std(pred_ppg, dim=-1, keepdim=True) + 1e-8
-    #             )
-
-    #             # Main loss: Hybrid loss (time + frequency)
-    #             total_samples = data_combined.shape[0]
-    #             main_loss = 0.0
-    #             for ib in range(total_samples):
-    #                 main_loss = main_loss + self.criterion(
-    #                     pred_ppg[ib], labels_combined[ib], epoch, self.config.TRAIN.DATA.FS, self.diff_flag
-    #                 )
-    #             main_loss = main_loss / total_samples
-
-    #             if self.config.TRAIN.AUG:
-    #                 feature_representation_orig = feature_representation[:N]
-    #                 feature_representation_aug = feature_representation[N:]
-    #                 consistency_loss = self.consistency_criterion(
-    #                     feature_representation_orig, feature_representation_aug
-    #                 )
-
-    #                 # Store representations for PSD visualization
-    #                 freqs, representation_orig, representation_aug = (
-    #                     self.consistency_criterion.get_representations()
-    #                 )
-    #                 epoch_freqs = freqs
-    #                 epoch_representation_orig.append(representation_orig.detach().mean(dim=0).cpu())
-    #                 epoch_representation_aug.append(representation_aug.detach().mean(dim=0).cpu())
-
-    #                 # Bell-shaped lambda_factor synchronized with OneCycleLR (pct_start = 0.3)
-    #                 current_iter = epoch * self.num_train_batches + idx
-    #                 r = current_iter / max(total_iter - 1, 1)
-    #                 if r <= 0.3:
-    #                     lambda_factor = 0.5 * (1.0 - np.cos(np.pi * (r / 0.3)))
-    #                 else:
-    #                     lambda_factor = 0.5 * (1.0 + np.cos(np.pi * ((r - 0.3) / 0.7)))
-
-    #                 loss = main_loss + 0.1 * lambda_factor * consistency_loss
-    #             else:
-    #                 loss = main_loss
-    #                 consistency_loss = torch.tensor(0.0, device=self.device)
-
-    #             loss.backward()
-    #             self.optimizer.step()
-    #             self.scheduler.step()
-
-    #             running_total += loss.item()
-    #             running_main += main_loss.item()
-    #             running_cons += consistency_loss.item()
-
-    #             tbar.set_postfix({
-    #                 "total": f"{running_total / (idx + 1):.4f}",
-    #                 "main": f"{running_main / (idx + 1):.4f}",
-    #                 "cons": f"{running_cons / (idx + 1):.4f}",
-    #             })
-
-    #         # Save PSD consistency figure after every training epoch
-    #         if epoch_freqs is not None:
-    #             self.plot_psd_consistency(
-    #                 epoch,
-    #                 epoch_freqs,
-    #                 epoch_representation_orig,
-    #                 epoch_representation_aug,
-    #             )
-
-    #         self.save_model(epoch)
-    #         if not self.config.TEST.USE_LAST_EPOCH:
-    #             valid_loss = self.valid(data_loader)
-    #             print("validation loss: ", valid_loss)
-    #             if self.min_valid_loss is None or valid_loss < self.min_valid_loss:
-    #                 self.min_valid_loss = valid_loss
-    #                 self.best_epoch = epoch
-    #                 print(f"Update best model! Best epoch: {self.best_epoch}")
-
-    #     if not self.config.TEST.USE_LAST_EPOCH:
-    #         print(f"best trained epoch: {self.best_epoch}, min_val_loss: {self.min_valid_loss}")
             
     
     def _set_bn_track_stats(self, track: bool):
@@ -172,6 +57,7 @@ class RhythmMambaTrainer(BaseTrainer):
         for m in self.model.modules():
             if isinstance(m, (torch.nn.BatchNorm1d, torch.nn.BatchNorm2d, torch.nn.BatchNorm3d)):
                 m.track_running_stats = track
+    
     
     # ---- Loss Time ---
     # def train(self, data_loader):
@@ -409,122 +295,6 @@ class RhythmMambaTrainer(BaseTrainer):
 
         if not self.config.TEST.USE_LAST_EPOCH:
             print(f"best trained epoch: {self.best_epoch}, min_val_loss: {self.min_valid_loss}")
-
-
-    # def train(self, data_loader):
-    #     """Training routine for model"""
-    #     if data_loader["train"] is None:
-    #         raise ValueError("No data for train")
-        
-    #     total_iter = self.max_epoch_num * self.num_train_batches
-
-    #     for epoch in range(self.max_epoch_num):
-    #         print('')
-    #         print(f"====Training Epoch: {epoch}====")
-    #         self.model.train()
-    #         epoch_representation_orig = []
-    #         epoch_representation_aug = []
-    #         epoch_freqs = None
-
-    #         # Model Training
-    #         # tbar = tqdm(data_loader["train"], ncols=80)
-    #         tbar = tqdm(data_loader["train"], dynamic_ncols=True)
-    #         for idx, batch in enumerate(tbar):
-    #             tbar.set_description("Train epoch %s" % epoch)
-
-    #             data, labels = batch[0].float(), batch[1].float()
-    #             data = data.to(self.device)
-    #             labels = labels.to(self.device)
-                
-    #             N, D, C, H, W = data.shape
-
-    #             if self.config.TRAIN.AUG:
-    #                 # print("AUG Called")
-    #                 data_aug, labels_aug = self.data_augmentation_ver2(data, labels)
-    #                 data_combined = torch.cat((data, data_aug), dim=0)
-    #                 labels_combined = torch.cat((labels, labels_aug), dim=0)
-    #             else:
-    #                 data_combined = data
-    #                 labels_combined = labels
-
-    #             data_combined = data_combined.to(self.device)
-    #             labels_combined = labels_combined.to(self.device)
-
-    #             self.optimizer.zero_grad()
-    #             pred_ppg, feature_representation = self.model(data_combined)
-    #             # print("pred_ppg shape: ", pred_ppg.shape)
-    #             # print("feature_representation shape: ", feature_representation.shape)
-    #             pred_ppg = (pred_ppg-torch.mean(pred_ppg, axis=-1).view(-1, 1))/torch.std(pred_ppg, axis=-1).view(-1, 1)    # normalize
-
-    #             # Main loss: Hybrid loss (time + frequency)
-    #             main_loss = 0.0
-    #             for ib in range(data_combined.shape[0]):
-    #                 main_loss = main_loss + self.criterion(pred_ppg[ib], labels_combined[ib], epoch , self.config.TRAIN.DATA.FS , self.diff_flag)
-    #             main_loss = main_loss / data_combined.shape[0]  # Average loss over the batch
-
-    #             if self.config.TRAIN.AUG:
-    #                 # Consistency loss: Cosine similarity between feature representations of original and augmented data
-    #                 feature_representation_orig = feature_representation[:N]
-    #                 feature_representation_aug = feature_representation[N:]
-    #                 consistency_loss = self.consistency_criterion(feature_representation_orig, feature_representation_aug)
-                    
-    #                 # For PSD visualization
-    #                 freqs, representation_orig, representation_aug = (
-    #                     self.consistency_criterion.get_representations()
-    #                 )
-    #                 epoch_freqs = freqs
-    #                 epoch_representation_orig.append(
-    #                     representation_orig.detach().mean(dim=0).cpu()
-    #                 )
-    #                 epoch_representation_aug.append(
-    #                     representation_aug.detach().mean(dim=0).cpu()
-    #                 )
-                    
-    #                 current_iter = epoch * self.num_train_batches + idx
-    #                 r = current_iter / max(total_iter - 1, 1)
-    #                 lambda_factor = 2.0 / (1.0 + np.exp(-10.0 * r)) - 1
-    #                 # lambda_factor = 2.0 / (1.0 + np.exp(-10.0 * r))
-                    
-    #                 # loss = main_loss + lambda_factor * consistency_loss
-    #                 loss = main_loss + 0.1 * lambda_factor * consistency_loss
-    #                 # loss = main_loss + 0.05 * consistency_loss
-    #             else:
-    #                 loss = main_loss
-    #                 consistency_loss = torch.tensor(0.0, device=self.device)
-
-    #             loss.backward()
-    #             self.optimizer.step()
-    #             self.scheduler.step()
-                
-    #             tbar.set_postfix({
-    #                 "total": f"{loss.item():.4f}",
-    #                 "main": f"{main_loss.item():.4f}",
-    #                 "cons": f"{consistency_loss.item():.4f}",
-    #             })
-                
-    #         # ===== SAVE PSD CONSISTENCY FIGURE AFTER EVERY TRAINING EPOCH =====
-    #         if epoch_freqs is not None:
-    #             self.plot_psd_consistency(
-    #                 epoch,
-    #                 epoch_freqs,
-    #                 epoch_representation_orig,
-    #                 epoch_representation_aug,
-    #             )
-
-    #         self.save_model(epoch)
-    #         if not self.config.TEST.USE_LAST_EPOCH: 
-    #             valid_loss = self.valid(data_loader)
-    #             print('validation loss: ', valid_loss)
-    #             if self.min_valid_loss is None:
-    #                 self.min_valid_loss = valid_loss
-    #                 self.best_epoch = epoch
-    #                 print("Update best model! Best epoch: {}".format(self.best_epoch))
-    #             elif (valid_loss < self.min_valid_loss):
-    #                 self.min_valid_loss = valid_loss
-    #                 self.best_epoch = epoch
-    #                 print("Update best model! Best epoch: {}".format(self.best_epoch))
-    #     if not self.config.TEST.USE_LAST_EPOCH: 
-    #         print("best trained epoch: {}, min_val_loss: {}".format(self.best_epoch, self.min_valid_loss))
             
 
     def valid(self, data_loader):
@@ -655,10 +425,10 @@ class RhythmMambaTrainer(BaseTrainer):
             data_aug = torch.flip(data_aug, dims=[4])
         return data_aug, labels_aug
     
+    
     def temporal_hr_resample(self, data, labels, index1, index2):
         """
-        Co giãn trục thời gian trực tiếp trên GPU Tensor để mở rộng phân phối nhịp tim
-        mà không gây nghẽn CPU-GPU.
+        Resample the temporal dimension of the data based on the heart rate.
         """
         N, D, C, H, W = data.shape
         device = data.device
@@ -671,13 +441,11 @@ class RhythmMambaTrainer(BaseTrainer):
         rand_vals = torch.rand(N, device=device)
 
         for idx in range(N):
-            # Xác suất 50% áp dụng co giãn nhịp tim
             if rand_vals[idx] < 0.5:
                 index = index1[idx] + index2[idx]
                 if index in self.data_dict:
                     gt_hr_fft = self.data_dict[index]
                 else:
-                    # calculate_hr thường nhận numpy array trên CPU
                     lbl_np = labels[idx].detach().cpu().numpy()
                     gt_hr_fft, _ = calculate_hr(
                         lbl_np, lbl_np, 
@@ -686,7 +454,6 @@ class RhythmMambaTrainer(BaseTrainer):
                     )
                     self.data_dict[index] = gt_hr_fft
 
-                # Nhịp tim cao (> 90 BPM) -> Giảm tốc 2 lần để tạo mẫu nhịp tim thấp (45-65 BPM cho PURE)
                 if gt_hr_fft > 90:
                     rand3 = random.randint(0, D // 2 - 1)
                     data_out[idx, even_indices] = data[idx, rand3 + even_indices // 2]
@@ -700,7 +467,6 @@ class RhythmMambaTrainer(BaseTrainer):
                         labels[idx, rand3 + odd_indices // 2] + 
                         labels[idx, rand3 + (odd_indices // 2) + 1]
                     )
-                # Nhịp tim thấp (< 75 BPM) -> Tăng tốc 2 lần để tạo mẫu nhịp tim cao
                 elif gt_hr_fft < 75:
                     data_out[idx, :D//2] = data[idx, ::2]
                     labels_out[idx, :D//2] = labels[idx, ::2]
@@ -718,9 +484,9 @@ class RhythmMambaTrainer(BaseTrainer):
         p_framerate = self.config.TRAIN.AUG_RATE.FRAMERATE
         p_gamma = self.config.TRAIN.AUG_RATE.GAMMA
         p_light = self.config.TRAIN.AUG_RATE.LIGHT
-        p_time_delay = self.config.TRAIN.AUG_RATE.TIME_DELAY
+        p_facial = self.config.TRAIN.AUG_RATE.FACIAL
         
-        total_p = p_motion + p_framerate + p_gamma + p_light + p_time_delay
+        total_p = p_motion + p_framerate + p_gamma + p_light + p_facial
         assert total_p <= 1.0, f"The sum of augmentation probabilities ({total_p}) must not exceed 1.0"
         
         data_aug = data.clone()
@@ -732,13 +498,13 @@ class RhythmMambaTrainer(BaseTrainer):
         t2 = t1 + p_framerate
         t3 = t2 + p_gamma
         t4 = t3 + p_light
-        t5 = t4 + p_time_delay
+        t5 = t4 + p_facial
         
         mask_motion     = (r < t1)
         mask_frame      = (r >= t1) & (r < t2)
         mask_gamma      = (r >= t2) & (r < t3)
         mask_light      = (r >= t3) & (r < t4)
-        mask_time_delay = (r >= t4) & (r < t5)
+        mask_facial     = (r >= t4) & (r < t5)
         # The range of [t5, 1.0) automatically corresponds to samples that remain unchanged (Identity)
         
         if mask_motion.any() and p_motion > 0:
@@ -753,8 +519,8 @@ class RhythmMambaTrainer(BaseTrainer):
         if mask_light.any() and p_light > 0:
             data_aug[mask_light] = utils.light_skin_tone_adjustment(data_aug[mask_light])
         
-        if mask_time_delay.any() and p_time_delay > 0:
-            data_aug[mask_time_delay] = utils.facial_expression_aug(data_aug[mask_time_delay])
+        if mask_facial.any() and p_facial > 0:
+            data_aug[mask_facial] = utils.facial_expression_aug(data_aug[mask_facial])
             
         return data_aug, labels_aug
     

@@ -5,34 +5,6 @@ from evaluation.post_process import calculate_hr
 import random
 
 # Motion augmentation
-# def jitter_affine(x, max_angles=2.0, max_translate=0.03):
-#     """
-#         Apply random affine transformations to the input tensor
-#     """
-#     N, D, C, H, W = x.shape
-#     x = x.contiguous().view(N * D, C, H, W)
-    
-#     # Generate random angles and translations
-#     angles = (torch.rand(N * D, device=x.device) * 2 - 1) * max_angles * math.pi / 180.0
-#     tx = (torch.rand(N * D, device=x.device) * 2 - 1) * max_translate
-#     ty = (torch.rand(N * D, device=x.device) * 2 - 1) * max_translate
-    
-#     affine_matrices = torch.zeros(N * D, 2, 3, device=x.device)
-#     affine_matrices[:, 0, 0] = torch.cos(angles)
-#     affine_matrices[:, 0, 1] = -torch.sin(angles)
-#     affine_matrices[:, 0, 2] = tx
-#     affine_matrices[:, 1, 0] = torch.sin(angles)
-#     affine_matrices[:, 1, 1] = torch.cos(angles)
-#     affine_matrices[:, 1, 2] = ty
-    
-#     grid = F.affine_grid(affine_matrices, x.size(), align_corners=False)
-#     jittered_x = F.grid_sample(x, grid, mode='bilinear', padding_mode='reflection', align_corners=False)
-    
-#     jittered_x = jittered_x.view(N, D, C, H, W)
-    
-#     return jittered_x
-
-
 def jitter_affine(x, max_angles=2.0, max_translate=0.03, knot_step=15):
     """
     Apply affine transformations with smooth temporal trajectory to the input tensor.
@@ -107,70 +79,6 @@ def frame_drop(x, min_ratio=0.85):
     return output_x
 
 
-# def frame_drop(x, min_ratio=0.8):
-#     """
-#     Randomly drop frames from the input tensor.
-#     """
-#     N, D, C, H, W = x.shape
-
-#     drop_ratio = torch.empty(1, device=x.device).uniform_(min_ratio, 0.95).item()
-#     D_downsampled = int(D * drop_ratio)
-
-#     inner_indices = torch.randperm(D - 2, device=x.device)[:D_downsampled - 2] + 1
-#     first_index = torch.tensor([0], device=x.device)
-#     last_index = torch.tensor([D - 1], device=x.device)
-
-#     selected_indices = torch.cat((first_index, inner_indices, last_index))
-#     selected_indices, _ = torch.sort(selected_indices)
-
-#     sampled_x = x[:, selected_indices, :, :, :]  # (N, D_downsampled, C, H, W)
-
-#     # Move temporal dimension to the last axis
-#     sampled_x = sampled_x.permute(0, 2, 3, 4, 1)  # (N, C, H, W, D_downsampled)
-
-#     # Treat each pixel's temporal sequence independently
-#     sampled_x = sampled_x.reshape(-1, 1, D_downsampled)
-
-#     # Interpolate only along the temporal dimension
-#     interpolated_x = F.interpolate(
-#         sampled_x,
-#         size=D,
-#         mode='linear',
-#         align_corners=False
-#     )
-
-#     # Restore original dimensions
-#     output_x = interpolated_x.reshape(N, C, H, W, D)
-#     output_x = output_x.permute(0, 4, 1, 2, 3)  # (N, D, C, H, W)
-
-#     return output_x
-
-
-# def frame_drop(x, min_ratio=0.8):
-#     """
-#         Randomly drop frames from the input tensor
-#     """
-#     N, D, C, H, W = x.shape
-    
-#     drop_ratio = torch.empty(1, device=x.device).uniform_(min_ratio, 0.95).item()
-#     D_downsampled = int(D * drop_ratio)
-    
-#     inner_indices = torch.randperm(D-2, device=x.device)[:D_downsampled-2] + 1
-#     first_index = torch.tensor([0], device=x.device)
-#     last_index = torch.tensor([D-1], device=x.device)
-    
-#     selected_indices = torch.cat((first_index, inner_indices, last_index))
-#     selected_indices, _ = torch.sort(selected_indices)
-    
-#     sampled_x = x[:, selected_indices, :, :, :]
-#     sampled_x = sampled_x.permute(0, 2, 1, 3, 4)  # (N, C, D_downsampled, H, W)
-    
-#     interpolated_x = F.interpolate(sampled_x, size=(D, H, W), mode='trilinear', align_corners=False)
-    
-#     output_x = interpolated_x.permute(0, 2, 1, 3, 4)  # (N, D, C, H, W)
-#     return output_x
-
-
 # Gamma augmentation
 def gamma_correction(x, gamma_range=(0.8, 2.2), eps=1e-6):
     """
@@ -211,11 +119,6 @@ def light_skin_tone_adjustment(x, noise_level=0.4):
     x_out = (x_light - mean) / (std + 1e-6)
     
     return x_out
-
-
-# Time Delay augmentation
-def time_delay(x, labels, fs=30, max_delay=0.5):
-    ...
     
 
 def facial_expression_aug(x, max_warp=0.05, knot_step=10):

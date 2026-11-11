@@ -101,5 +101,5 @@ INFERENCE:
     USE_SMALLER_WINDOW: False        # Change this if you'd like an evaluation window smaller than the test video length
     WINDOW_SIZE: 10        # In seconds
   # MODEL_PATH:   "PreTrainedModels/UBFC_cross_RhythmMamba.pth"
-  MODEL_PATH: "PreTrainedModels/UBFC_SizeW128_SizeH128_ClipLength160_DataTypeStandardized_DataAugNone_LabelTypeStandardized_Crop_faceTrue_Large_boxTrue_Large_size1.5_Dyamic_DetFalse_det_len30_Median_face_boxFalse/UBFC_RhythmMamba_AUG_LossConsFreq_Epoch26.pth"
+  MODEL_PATH: "PreTrainedModels/UBFC_SizeW128_SizeH128_ClipLength160_DataTypeStandardized_DataAugNone_LabelTypeStandardized_Crop_faceTrue_Large_boxTrue_Large_size1.5_Dyamic_DetFalse_det_len30_Median_face_boxFalse/UBFC_RhythmMamba_AUG_LossConsFreq_Epoch23_c.pth"
                   

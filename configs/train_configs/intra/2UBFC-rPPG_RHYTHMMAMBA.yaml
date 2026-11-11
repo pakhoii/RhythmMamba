@@ -9,9 +9,9 @@ TRAIN:
 
   AUG_RATE: # For UBFC dataset
     GAMMA: 0.1
-    LIGHT: 0.2
+    LIGHT: 0.15
     FRAMERATE: 0.3
-    TIME_DELAY: 0.1
+    FACIAL: 0.15
     MOTION: 0.3
 
   DATA:
