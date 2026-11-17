@@ -325,10 +325,10 @@ class RhythmMamba(nn.Module):
 
         rPPG = x.permute(0,2,1) 
         rPPG = self.upsample(rPPG)
-        rPPG = self.ConvBlockLast(rPPG)    #[N, 1, D]
         
         feature_representation = rPPG.permute(0, 2, 1)  # [N, D, 1]
         
+        rPPG = self.ConvBlockLast(rPPG)    #[N, 1, D]
         rPPG = rPPG.squeeze(1)
 
         return rPPG, feature_representation

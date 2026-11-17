@@ -74,48 +74,89 @@ class Freq_Consistency_Loss(nn.Module):
             self.freq_representation_orig,
             self.freq_representation_aug
         )
-    
+        
+        
     def forward(self, feat_ori, feat_aug):
+        feat_ori = feat_ori.detach()  # Ngắt gradient nhánh sạch ngay từ đầu
         N, D, C = feat_ori.shape
         device = feat_ori.device
         
-        # DC removal -> Remove the power at 0 Hz
-        # Minus the mean along the temporal dimension
+        # 1. DC removal along temporal dimension (dim=1)
         feat_ori = feat_ori - torch.mean(feat_ori, dim=1, keepdim=True)
-        feat_aug  = feat_aug  - torch.mean(feat_aug, dim=1, keepdim=True)
+        feat_aug = feat_aug - torch.mean(feat_aug, dim=1, keepdim=True)
 
-        # Compute the FFT along the temporal dimension
+        # 2. Windowed FFT along temporal dimension (dim=1)
         win = torch.hann_window(D, device=device, dtype=feat_ori.dtype).view(1, D, 1)
-        feat_ori = feat_ori * win
-        feat_aug  = feat_aug  * win
-        fft_ori = torch.fft.rfft(feat_ori, n=self.nfft, dim=1)
-        fft_aug  = torch.fft.rfft(feat_aug,  n=self.nfft, dim=1)
+        fft_ori = torch.fft.rfft(feat_ori * win, n=self.nfft, dim=1)
+        fft_aug = torch.fft.rfft(feat_aug * win, n=self.nfft, dim=1)
         
-        # Masking the frequency range of HR (0.75 Hz to 2.5 Hz)
-        freqs = torch.fft.rfftfreq(self.nfft, d=1/self.fs).to(device)
+        # 3. Mask HR frequency range [min_freq, max_freq]
+        freqs = torch.fft.rfftfreq(self.nfft, d=1.0 / self.fs).to(device)
         mask = (freqs >= self.min_freq) & (freqs <= self.max_freq)
-        fft_ori = fft_ori[:, mask, :]
-        fft_aug  = fft_aug[:, mask, :]
         
-        # Compute the power spectral density (PSD)
-        psd_ori = torch.abs(fft_ori) ** 2
-        psd_aug  = torch.abs(fft_aug) ** 2
+        # Shape: [N, F_masked, C]
+        psd_ori = torch.abs(fft_ori[:, mask, :]) ** 2
+        psd_aug = torch.abs(fft_aug[:, mask, :]) ** 2
         
-        # Average the PSD across channels to get a single representation per sample
-        psd_ori_nf = torch.mean(psd_ori, dim=-1)
-        psd_aug_nf  = torch.mean(psd_aug, dim=-1)
+        # 4. Chuẩn hóa phổ trên TỪNG KÊNH ĐỘC LẬP dọc theo trục tần số (dim=1)
+        psd_ori_shifted = psd_ori - torch.amin(psd_ori, dim=1, keepdim=True)
+        psd_aug_shifted = psd_aug - torch.amin(psd_aug, dim=1, keepdim=True)
         
-        psd_ori_nf = psd_ori_nf - torch.amin(psd_ori_nf, dim=-1, keepdim=True)
-        psd_aug_nf = psd_aug_nf - torch.amin(psd_aug_nf, dim=-1, keepdim=True)
+        psd_ori_norm = F.normalize(psd_ori_shifted, p=2, dim=1)  # [N, F_masked, C]
+        psd_aug_norm = F.normalize(psd_aug_shifted, p=2, dim=1)  # [N, F_masked, C]
         
-        self.freq_representation_orig = F.normalize(psd_ori_nf.detach(), p=2, dim=-1)
-        self.freq_representation_aug  = F.normalize(psd_aug_nf.detach(), p=2, dim=-1)
+        # Lưu bản trung bình kênh [N, F_masked] để hàm plot_psd_consistency hoạt động bình thường
+        self.freq_representation_orig = F.normalize(psd_ori_norm.mean(dim=-1), p=2, dim=-1)
+        self.freq_representation_aug  = F.normalize(psd_aug_norm.mean(dim=-1), p=2, dim=-1)
         self.freq_hr = freqs[mask].detach()
         
-        # Calculate the cosine similarity between the two frequency representations
-        cosine_similarity = F.cosine_similarity(psd_ori_nf.detach(), psd_aug_nf, dim=-1, eps=1e-8)
+        # 5. Tính Cosine Similarity dọc theo trục tần số (dim=1) cho từng kênh -> Shape: [N, C]
+        cosine_similarity = F.cosine_similarity(psd_ori_norm, psd_aug_norm, dim=1, eps=1e-8)
         
-        return 1 - cosine_similarity.mean()
+        return 1.0 - cosine_similarity.mean()
+    
+    
+    # def forward(self, feat_ori, feat_aug):
+    #     N, D, C = feat_ori.shape
+    #     device = feat_ori.device
+        
+    #     # DC removal -> Remove the power at 0 Hz
+    #     # Minus the mean along the temporal dimension
+    #     feat_ori = feat_ori - torch.mean(feat_ori, dim=1, keepdim=True)
+    #     feat_aug  = feat_aug  - torch.mean(feat_aug, dim=1, keepdim=True)
+
+    #     # Compute the FFT along the temporal dimension
+    #     win = torch.hann_window(D, device=device, dtype=feat_ori.dtype).view(1, D, 1)
+    #     feat_ori = feat_ori * win
+    #     feat_aug  = feat_aug  * win
+    #     fft_ori = torch.fft.rfft(feat_ori, n=self.nfft, dim=1)
+    #     fft_aug  = torch.fft.rfft(feat_aug,  n=self.nfft, dim=1)
+        
+    #     # Masking the frequency range of HR (0.75 Hz to 2.5 Hz)
+    #     freqs = torch.fft.rfftfreq(self.nfft, d=1/self.fs).to(device)
+    #     mask = (freqs >= self.min_freq) & (freqs <= self.max_freq)
+    #     fft_ori = fft_ori[:, mask, :]
+    #     fft_aug  = fft_aug[:, mask, :]
+        
+    #     # Compute the power spectral density (PSD)
+    #     psd_ori = torch.abs(fft_ori) ** 2
+    #     psd_aug  = torch.abs(fft_aug) ** 2
+        
+    #     # Average the PSD across channels to get a single representation per sample
+    #     psd_ori_nf = torch.mean(psd_ori, dim=-1)
+    #     psd_aug_nf  = torch.mean(psd_aug, dim=-1)
+        
+    #     psd_ori_nf = psd_ori_nf - torch.amin(psd_ori_nf, dim=-1, keepdim=True)
+    #     psd_aug_nf = psd_aug_nf - torch.amin(psd_aug_nf, dim=-1, keepdim=True)
+        
+    #     self.freq_representation_orig = F.normalize(psd_ori_nf.detach(), p=2, dim=-1)
+    #     self.freq_representation_aug  = F.normalize(psd_aug_nf.detach(), p=2, dim=-1)
+    #     self.freq_hr = freqs[mask].detach()
+        
+    #     # Calculate the cosine similarity between the two frequency representations
+    #     cosine_similarity = F.cosine_similarity(psd_ori_nf.detach(), psd_aug_nf, dim=-1, eps=1e-8)
+        
+    #     return 1 - cosine_similarity.mean()
 
 
 # Time consistency loss
