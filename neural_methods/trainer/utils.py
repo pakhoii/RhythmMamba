@@ -121,7 +121,7 @@ def light_skin_tone_adjustment(x, noise_level=0.4):
     return x_out
     
 
-def facial_expression_aug(x, max_warp=0.05, knot_step=10):
+def facial_expression_aug(x, max_warp=0.05, knot_step=15):
     """
     Simulate non-rigid facial muscle movements (e.g., talking, facial expressions)
     via anatomically weighted spatio-temporal elastic grid warping (without shading).
