@@ -57,7 +57,7 @@ class Hybrid_Loss(nn.Module):
     
 # Frequency consistency loss    
 class Freq_Consistency_Loss(nn.Module):
-    def __init__(self, fs=30.0, nfft=1024, min_freq=0.7, max_freq=3.0):
+    def __init__(self, fs=30.0, nfft=1024, min_freq=0.7, max_freq=2.5):
         super(Freq_Consistency_Loss, self).__init__()
         self.fs = fs
         self.nfft = nfft
