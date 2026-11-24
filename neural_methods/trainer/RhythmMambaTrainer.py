@@ -185,42 +185,87 @@ class RhythmMambaTrainer(BaseTrainer):
 
     def data_augmentation(self,data,labels,index1,index2):
         N, D, C, H, W = data.shape
-        data_aug = np.zeros((N, D, C, H, W))
-        labels_aug = np.zeros((N, D))
-        rand1_vals = np.random.random(N)
-        rand2_vals = np.random.random(N)
+        device = data.device
+        
+        data_out = data.clone()
+        labels_out = labels.clone()
+        
+        even_indices = torch.arange(0, D, 2, device=device)
+        odd_indices = even_indices + 1
+        rand_vals = torch.rand(N, device=device)
+
         for idx in range(N):
-            index = index1[idx] + index2[idx]
-            rand1 = rand1_vals[idx]
-            rand2 = rand2_vals[idx]
-            if rand1 < 0.5 :
+            if rand_vals[idx] < 0.5:
+                index = index1[idx] + index2[idx]
                 if index in self.data_dict:
                     gt_hr_fft = self.data_dict[index]
                 else:
-                    gt_hr_fft, _  = calculate_hr(labels[idx], labels[idx] , diff_flag = self.diff_flag , fs=self.config.VALID.DATA.FS)
+                    lbl_np = labels[idx].detach().cpu().numpy()
+                    gt_hr_fft, _ = calculate_hr(
+                        lbl_np, lbl_np, 
+                        diff_flag=self.diff_flag, 
+                        fs=self.config.VALID.DATA.FS
+                    )
                     self.data_dict[index] = gt_hr_fft
+
+                if gt_hr_fft > 90:
+                    rand3 = random.randint(0, D // 2 - 1)
+                    data_out[idx, even_indices] = data[idx, rand3 + even_indices // 2]
+                    labels_out[idx, even_indices] = labels[idx, rand3 + even_indices // 2]
                     
-                if gt_hr_fft > 90: 
-                    rand3 = random.randint(0, D//2-1)
-                    even_indices = torch.arange(0, D, 2)
-                    odd_indices = even_indices + 1
-                    data_aug[:, even_indices, :, :, :] = data[:, rand3 + even_indices// 2, :, :, :]
-                    labels_aug[:, even_indices] = labels[:, rand3 + even_indices // 2]
-                    data_aug[:, odd_indices, :, :, :] = (data[:, rand3 + odd_indices // 2, :, :, :] + data[:, rand3 + (odd_indices // 2) + 1, :, :, :]) / 2
-                    labels_aug[:, odd_indices] = (labels[:, rand3 + odd_indices // 2] + labels[:, rand3 + (odd_indices // 2) + 1]) / 2
-                elif gt_hr_fft < 75 :
-                    data_aug[:, :D//2, :, :, :] = data[:, ::2, :, :, :]
-                    labels_aug[:, :D//2] = labels[:, ::2]
-                    data_aug[:, D//2:, :, :, :] = data_aug[:, :D//2, :, :, :]
-                    labels_aug[:, D//2:] = labels_aug[:, :D//2]
-                else :
-                    data_aug[idx] = data[idx]
-                    labels_aug[idx] = labels[idx]                                      
-            else :
-                data_aug[idx] = data[idx]
-                labels_aug[idx] = labels[idx]
-        data_aug = torch.tensor(data_aug).float()
-        labels_aug = torch.tensor(labels_aug).float()
-        if rand2 < 0.5:
-            data_aug = torch.flip(data_aug, dims=[4])
-        return data_aug, labels_aug
+                    data_out[idx, odd_indices] = 0.5 * (
+                        data[idx, rand3 + odd_indices // 2] + 
+                        data[idx, rand3 + (odd_indices // 2) + 1]
+                    )
+                    labels_out[idx, odd_indices] = 0.5 * (
+                        labels[idx, rand3 + odd_indices // 2] + 
+                        labels[idx, rand3 + (odd_indices // 2) + 1]
+                    )
+                elif gt_hr_fft < 75:
+                    data_out[idx, :D//2] = data[idx, ::2]
+                    labels_out[idx, :D//2] = labels[idx, ::2]
+                    data_out[idx, D//2:] = data_out[idx, :D//2]
+                    labels_out[idx, D//2:] = labels_out[idx, :D//2]
+
+        return data_out, labels_out
+        
+        # N, D, C, H, W = data.shape
+        # data_aug = np.zeros((N, D, C, H, W))
+        # labels_aug = np.zeros((N, D))
+        # rand1_vals = np.random.random(N)
+        # rand2_vals = np.random.random(N)
+        # for idx in range(N):
+        #     index = index1[idx] + index2[idx]
+        #     rand1 = rand1_vals[idx]
+        #     rand2 = rand2_vals[idx]
+        #     if rand1 < 0.5 :
+        #         if index in self.data_dict:
+        #             gt_hr_fft = self.data_dict[index]
+        #         else:
+        #             gt_hr_fft, _  = calculate_hr(labels[idx], labels[idx] , diff_flag = self.diff_flag , fs=self.config.VALID.DATA.FS)
+        #             self.data_dict[index] = gt_hr_fft
+                    
+        #         if gt_hr_fft > 90: 
+        #             rand3 = random.randint(0, D//2-1)
+        #             even_indices = torch.arange(0, D, 2)
+        #             odd_indices = even_indices + 1
+        #             data_aug[:, even_indices, :, :, :] = data[:, rand3 + even_indices// 2, :, :, :]
+        #             labels_aug[:, even_indices] = labels[:, rand3 + even_indices // 2]
+        #             data_aug[:, odd_indices, :, :, :] = (data[:, rand3 + odd_indices // 2, :, :, :] + data[:, rand3 + (odd_indices // 2) + 1, :, :, :]) / 2
+        #             labels_aug[:, odd_indices] = (labels[:, rand3 + odd_indices // 2] + labels[:, rand3 + (odd_indices // 2) + 1]) / 2
+        #         elif gt_hr_fft < 75 :
+        #             data_aug[:, :D//2, :, :, :] = data[:, ::2, :, :, :]
+        #             labels_aug[:, :D//2] = labels[:, ::2]
+        #             data_aug[:, D//2:, :, :, :] = data_aug[:, :D//2, :, :, :]
+        #             labels_aug[:, D//2:] = labels_aug[:, :D//2]
+        #         else :
+        #             data_aug[idx] = data[idx]
+        #             labels_aug[idx] = labels[idx]                                      
+        #     else :
+        #         data_aug[idx] = data[idx]
+        #         labels_aug[idx] = labels[idx]
+        # data_aug = torch.tensor(data_aug).float()
+        # labels_aug = torch.tensor(labels_aug).float()
+        # if rand2 < 0.5:
+        #     data_aug = torch.flip(data_aug, dims=[4])
+        # return data_aug, labels_aug
